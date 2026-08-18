@@ -28,9 +28,7 @@
 
 ## 截图
 
-| 中文 | English |
-| --- | --- |
-| ![额度面板（中文）](docs/panel-zh.png) | ![Quota panel in English](docs/panel-en.png) |
+![额度面板（中文）](docs/panel-zh.png)
 
 ## 安装
 
