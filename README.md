@@ -26,6 +26,12 @@
 - **Configurable refresh** — adjustable in the panel (15s–30min, persisted in localStorage); the default comes from the plugin config.
 - **Manual providers** — add arbitrary gateways (e.g. a self-hosted DeepSeek-compatible endpoint) via config.
 
+## Screenshots
+
+| English | 中文 |
+| --- | --- |
+| ![Quota panel in English](docs/panel-en.png) | ![额度面板（中文）](docs/panel-zh.png) |
+
 ## Install
 
 > [!NOTE]

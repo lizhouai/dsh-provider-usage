@@ -26,6 +26,12 @@
 - **刷新周期可调** —— 面板内调整（15s–30min，localStorage 持久化），默认值由插件配置提供。
 - **手动 provider** —— 可通过配置添加任意网关（如自建 DeepSeek 兼容端点）。
 
+## 截图
+
+| 中文 | English |
+| --- | --- |
+| ![额度面板（中文）](docs/panel-zh.png) | ![Quota panel in English](docs/panel-en.png) |
+
 ## 安装
 
 > [!NOTE]
