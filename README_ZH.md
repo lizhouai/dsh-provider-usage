@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-provider-quota"><img src="https://img.shields.io/npm/v/dsh-provider-quota.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-provider-quota"><img src="https://img.shields.io/npm/v/dsh-provider-quota.svg?cacheSeconds=300" alt="npm version"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-provider-quota.svg?cacheSeconds=300" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness plugin">
 </p>
@@ -22,6 +22,7 @@
 - **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。
 - **侧边栏入口** —— 侧边栏底部按钮点击弹出额度面板；任一 provider 异常时按钮显示红点。
 - **版本徽章** —— 面板标题旁显示当前运行的插件版本，一眼确认加载的是哪个发布版。
+- **中英双语** —— 面板内置中英文界面，默认跟随 harness 系统语言，标题栏按钮一键切换（localStorage 持久化）。
 - **刷新周期可调** —— 面板内调整（15s–30min，localStorage 持久化），默认值由插件配置提供。
 - **手动 provider** —— 可通过配置添加任意网关（如自建 DeepSeek 兼容端点）。
 
@@ -33,7 +34,7 @@
 ### npm
 
 ```sh
-dsh plugin --profile web add dsh-provider-quota
+dsh plugin --profile web add dsh-provider-quota@latest
 ```
 
 ### 从源码构建
@@ -57,7 +58,7 @@ dsh plugin --profile web add ./dsh-provider-quota-<version>.tgz
 dsh plugin --profile web add dsh-provider-quota@latest
 ```
 
-然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-quota@0.1.3`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
+然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-quota@0.1.5`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
 
 ## 配置说明
 

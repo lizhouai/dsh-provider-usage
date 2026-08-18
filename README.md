@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-provider-quota"><img src="https://img.shields.io/npm/v/dsh-provider-quota.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-provider-quota"><img src="https://img.shields.io/npm/v/dsh-provider-quota.svg?cacheSeconds=300" alt="npm version"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-provider-quota.svg?cacheSeconds=300" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness plugin">
 </p>
@@ -22,6 +22,7 @@
 - **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk.
 - **Sidebar widget** — an entry button in the sidebar footer opens the quota panel; the button shows a red dot when any provider errors out.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
+- **Bilingual panel** — built-in Chinese/English UI; follows the harness language by default, with a one-click toggle in the panel header (persisted in localStorage).
 - **Configurable refresh** — adjustable in the panel (15s–30min, persisted in localStorage); the default comes from the plugin config.
 - **Manual providers** — add arbitrary gateways (e.g. a self-hosted DeepSeek-compatible endpoint) via config.
 
@@ -57,7 +58,7 @@ Restart `dsh web` after changing the plugin set (a plugin add/remove requires a 
 dsh plugin --profile web add dsh-provider-quota@latest
 ```
 
-Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-quota@0.1.3`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
+Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-quota@0.1.5`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
 
 ## Configuration
 
