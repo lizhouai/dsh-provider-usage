@@ -41,12 +41,21 @@ const CSS = `
   padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-fill-l2);
   font-variant-numeric: tabular-nums; user-select: none; margin-right: auto;
 }
+.dsh-quota-lang {
+  cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+  border: 0; border-radius: 6px; background: 0; padding: 3px 5px;
+  color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px;
+}
+.dsh-quota-lang:hover { color: var(--dsw-alias-label-secondary); }
 .dsh-quota-refresh {
-  cursor: pointer; border: 0; border-radius: 6px; background: 0; padding: 3px 6px;
-  color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: 0; padding: 4px;
+  color: var(--dsw-alias-label-tertiary); line-height: 0;
 }
 .dsh-quota-refresh:hover { color: var(--dsw-alias-label-secondary); }
 .dsh-quota-refresh:disabled { opacity: 0.5; cursor: default; }
+@keyframes dsh-quota-spin { to { transform: rotate(360deg); } }
+.dsh-quota-refresh--loading svg { animation: dsh-quota-spin 0.9s linear infinite; }
 .dsh-quota-card {
   border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
   background: var(--dsw-alias-fill-l2);

@@ -33,7 +33,7 @@
 ### npm
 
 ```sh
-dsh plugin --profile web add dsh-provider-quota
+dsh plugin --profile web add dsh-provider-quota@latest
 ```
 
 ### Build from source
@@ -43,8 +43,11 @@ git clone https://github.com/lizhouai/dsh-provider-quota.git
 cd dsh-provider-quota
 pnpm install
 pnpm build
-dsh plugin --profile web add .
+pnpm pack   # produces dsh-provider-quota-<version>.tgz
+dsh plugin --profile web add ./dsh-provider-quota-<version>.tgz
 ```
+
+Install the **tarball**, not the repo directory: `dsh plugin add .` links the repo, whose own `node_modules` then shadows the harness's shared `@deepseek-ai/cordis` instance and the host half never registers (RPC 404). The link form is still handy for client-only UI iteration — the browser bundle is self-contained, so a rebuild + page refresh picks it up — but switch to the tarball (or the npm release) whenever you need the host half. If pnpm fails with `EPERM ... symlink` while replacing a linked install, delete the stale `node_modules/dsh-provider-quota` junction in the profile directory and retry.
 
 Restart `dsh web` after changing the plugin set (a plugin add/remove requires a restart; afterwards, code changes only need a rebuild + re-add + page refresh).
 

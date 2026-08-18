@@ -4,8 +4,9 @@
  * Polling interval is user-selectable (persisted in localStorage) and falls
  * back to the deployment-suggested value from the host plugin config.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { en, zh } from './locales'
 
 /* ------------------------------------------------------------------ *
  * Wire views (mirror of the host half)
@@ -60,7 +61,37 @@ export interface QuotaActionProps {
 
 const INTERVAL_OPTIONS = [15, 30, 60, 300, 900, 1800] as const
 const STORAGE_KEY = 'dsh.provider-quota.refreshSeconds'
+const LANG_KEY = 'dsh.provider-quota.lang'
 const DEFAULT_INTERVAL = 60
+
+type Lang = 'zh' | 'en'
+
+/** Panel-level override stored in localStorage; null means follow the harness language. */
+function readStoredLang(): Lang | null {
+  try {
+    const raw = localStorage.getItem(LANG_KEY)
+    return raw === 'zh' || raw === 'en' ? raw : null
+  } catch {
+    return null
+  }
+}
+
+function storeLang(lang: Lang): void {
+  try {
+    localStorage.setItem(LANG_KEY, lang)
+  } catch {
+    /* storage unavailable: keep the in-memory value only */
+  }
+}
+
+/** Local translator over the bundled dictionaries, mirroring the shell's `{param}` interpolation. */
+function makeT(dict: Record<string, string>): QuotaActionProps['t'] {
+  return (key, params) => {
+    const template = dict[key] ?? key
+    if (params === undefined) return template
+    return template.replace(/\{(\w+)\}/g, (raw, name: string) => (name in params ? String(params[name]) : raw))
+  }
+}
 
 function readStoredInterval(): number | null {
   try {
@@ -193,13 +224,47 @@ function CoinIcon() {
   )
 }
 
+function RefreshIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+      <path d="M20 4v4h-4" />
+    </svg>
+  )
+}
+
+function GlobeIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3c2.5 2.6 3.9 5.7 3.9 9s-1.4 6.4-3.9 9c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z" />
+    </svg>
+  )
+}
+
 export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<QuotaListResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [intervalSec, setIntervalSec] = useState(() => readStoredInterval() ?? DEFAULT_INTERVAL)
+  const [langOverride, setLangOverride] = useState<Lang | null>(() => readStoredLang())
   const [now, setNow] = useState(() => Date.now())
+
+  // Follow the harness language by default: probe the shell-injected
+  // translator with a known key, then let a panel-level override win.
+  const harnessLang: Lang | null =
+    t('lang.switch') === zh['lang.switch'] ? 'zh' : t('lang.switch') === en['lang.switch'] ? 'en' : null
+  const lang: Lang = langOverride ?? harnessLang ?? 'en'
+  const tt = useMemo(() => makeT(lang === 'zh' ? (zh as Record<string, string>) : (en as Record<string, string>)), [lang])
+  const toggleLang = useCallback(() => {
+    setLangOverride((current) => {
+      const next: Lang = (current ?? harnessLang ?? 'en') === 'zh' ? 'en' : 'zh'
+      storeLang(next)
+      return next
+    })
+  }, [harnessLang])
   const [panelPos, setPanelPos] = useState<{ left: number; bottom: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -293,8 +358,8 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
         type="button"
         className="dsh-quota-trigger"
         aria-expanded={open}
-        aria-label={t('action.aria')}
-        title={t('action.aria')}
+        aria-label={tt('action.aria')}
+        title={tt('action.aria')}
         onClick={() => {
           setNow(Date.now())
           setOpen((current) => !current)
@@ -302,7 +367,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
         }}
       >
         <span className="dsh-quota-triggerIcon"><CoinIcon /></span>
-        {wide ? <span>{t('action.label')}</span> : null}
+        {wide ? <span>{tt('action.label')}</span> : null}
         {hasFailure ? <span className="dsh-quota-errorDot" /> : null}
       </button>
       {open && panelPos !== null
@@ -311,28 +376,45 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
             ref={panelRef}
             className="dsh-quota-panel"
             role="dialog"
-            aria-label={t('panel.title')}
+            aria-label={tt('panel.title')}
             style={{ left: panelPos.left, bottom: panelPos.bottom }}
             onKeyDown={onKeyDown}
           >
           <div className="dsh-quota-head">
-            <span className="dsh-quota-title">{t('panel.title')}</span>
+            <span className="dsh-quota-title">{tt('panel.title')}</span>
             {data?.version ? <span className="dsh-quota-version">v{data.version}</span> : null}
-            <button type="button" className="dsh-quota-refresh" disabled={loading} onClick={refresh}>
-              {loading ? t('panel.refreshing') : t('panel.refresh')}
+            <button
+              type="button"
+              className="dsh-quota-lang"
+              onClick={toggleLang}
+              title={tt('lang.switch')}
+              aria-label={tt('lang.switch')}
+            >
+              <GlobeIcon />
+              <span>{lang === 'zh' ? '中' : 'EN'}</span>
+            </button>
+            <button
+              type="button"
+              className={`dsh-quota-refresh${loading ? ' dsh-quota-refresh--loading' : ''}`}
+              disabled={loading}
+              onClick={refresh}
+              title={tt('panel.refresh')}
+              aria-label={tt('panel.refresh')}
+            >
+              <RefreshIcon />
             </button>
           </div>
           {data === null && error !== null ? (
-            <span className="dsh-quota-message">{t('status.error')}: {error}</span>
+            <span className="dsh-quota-message">{tt('status.error')}: {error}</span>
           ) : null}
           {data !== null && data.providers.length === 0 ? (
-            <span className="dsh-quota-message">{t('panel.empty')}</span>
+            <span className="dsh-quota-message">{tt('panel.empty')}</span>
           ) : null}
           {(data?.providers ?? []).map((provider) => (
-            <ProviderCard key={provider.id} provider={provider} now={now} t={t} />
+            <ProviderCard key={provider.id} provider={provider} now={now} t={tt} />
           ))}
           <div className="dsh-quota-foot">
-            <span className="dsh-quota-footLabel">{t('panel.interval')}</span>
+            <span className="dsh-quota-footLabel">{tt('panel.interval')}</span>
             <select
               className="dsh-quota-select"
               value={intervalSec}
@@ -343,13 +425,13 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
               }}
             >
               {INTERVAL_OPTIONS.map((seconds) => (
-                <option key={seconds} value={seconds}>{t(`interval.${seconds}s`)}</option>
+                <option key={seconds} value={seconds}>{tt(`interval.${seconds}s`)}</option>
               ))}
             </select>
             <span className="dsh-quota-updated">
               {data === null
-                ? t('panel.never')
-                : t('panel.updated', { time: new Date(data.fetchedAt).toLocaleTimeString() })}
+                ? tt('panel.never')
+                : tt('panel.updated', { time: new Date(data.fetchedAt).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US') })}
             </span>
           </div>
           </div>,

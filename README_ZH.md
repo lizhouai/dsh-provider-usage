@@ -43,8 +43,11 @@ git clone https://github.com/lizhouai/dsh-provider-quota.git
 cd dsh-provider-quota
 pnpm install
 pnpm build
-dsh plugin --profile web add .
+pnpm pack   # 产出 dsh-provider-quota-<version>.tgz
+dsh plugin --profile web add ./dsh-provider-quota-<version>.tgz
 ```
+
+注意要安装 **tarball** 而不是仓库目录：`dsh plugin add .` 会链接整个仓库，仓库自带 `node_modules` 里的 `@deepseek-ai/cordis` 会遮蔽 harness 的共享实例，导致 host 半注册不上（RPC 404）。link 方式仍适合纯 UI 迭代（浏览器 bundle 自包含，重新 build + 刷新页面即生效），但需要 host 半时请切换到 tarball 或 npm 正式版。若替换 link 安装时 pnpm 报 `EPERM ... symlink`，手动删除 profile 目录下残留的 `node_modules/dsh-provider-quota` 联结后重试即可。
 
 插件集合变化后需重启 `dsh web`；之后仅改动代码时重新 build + 重新 add + 刷新页面即可。
 
