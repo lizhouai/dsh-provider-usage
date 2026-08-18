@@ -15,6 +15,7 @@
  * this service stays stateless: every call fetches live values.
  * @module dsh-provider-quota
  */
+import { createRequire } from 'node:module'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -23,6 +24,9 @@ import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-sett
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
 export const name = 'provider-quota'
+
+/** Own package version, read from the installed package.json (lib/index.js sits one level below the root). */
+export const version: string = createRequire(import.meta.url)('../package.json').version
 
 const NS = settingsNamespace('provider-quota')
 
@@ -62,6 +66,8 @@ export interface QuotaListResult {
   fetchedAt: string
   /** Deployment-suggested refresh interval; the widget may override it locally. */
   refreshSeconds: number
+  /** Plugin package version, surfaced in the panel header. */
+  version: string
   providers: ProviderQuotaView[]
 }
 
@@ -277,6 +283,7 @@ export class QuotaService extends TypertRemoteService {
     return {
       fetchedAt: new Date().toISOString(),
       refreshSeconds: this.options().refreshSeconds,
+      version,
       providers,
     }
   }

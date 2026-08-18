@@ -40,6 +40,8 @@ interface ProviderQuotaView {
 interface QuotaListResult {
   fetchedAt: string
   refreshSeconds: number
+  /** Plugin package version (absent on older hosts). */
+  version?: string
   providers: ProviderQuotaView[]
 }
 
@@ -315,6 +317,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
           >
           <div className="dsh-quota-head">
             <span className="dsh-quota-title">{t('panel.title')}</span>
+            {data?.version ? <span className="dsh-quota-version">v{data.version}</span> : null}
             <button type="button" className="dsh-quota-refresh" disabled={loading} onClick={refresh}>
               {loading ? t('panel.refreshing') : t('panel.refresh')}
             </button>
