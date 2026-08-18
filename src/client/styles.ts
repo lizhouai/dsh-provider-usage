@@ -35,11 +35,11 @@ const CSS = `
   display: flex; align-items: center; gap: 8px; padding: 2px 4px 6px;
   border-bottom: 1px solid var(--dsw-alias-border-l2);
 }
-.dsh-quota-title { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; flex: 1; }
+.dsh-quota-title { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; }
 .dsh-quota-version {
   color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px;
   padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-fill-l2);
-  font-variant-numeric: tabular-nums; user-select: none;
+  font-variant-numeric: tabular-nums; user-select: none; margin-right: auto;
 }
 .dsh-quota-refresh {
   cursor: pointer; border: 0; border-radius: 6px; background: 0; padding: 3px 6px;
