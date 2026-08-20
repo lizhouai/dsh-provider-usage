@@ -3,16 +3,37 @@
  * convention of a `<style data-plugin-css>` tag and design-token colors.
  */
 const CSS = `
-.dsh-quota-root { position: relative; }
+.dsh-quota-root { position: relative; display: inline-flex; }
 .dsh-quota-trigger {
-  min-height: 28px; cursor: pointer; background: 0; border: 0; border-radius: 6px;
-  align-items: center; gap: 4px; padding: 3px 6px;
+  position: relative; flex: none; min-height: 28px; cursor: pointer; background: 0; border: 0; border-radius: 6px;
+  align-items: center; justify-content: center; gap: 4px; padding: 3px 6px;
   font-size: 12px; line-height: 18px; display: inline-flex;
   color: var(--dsw-alias-label-tertiary);
 }
-.dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible { color: var(--dsw-alias-label-secondary); }
+.dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible {
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-fill-l2);
+}
+/* Collapsed sidebar: a centered square icon button with the same footprint
+   as the neighboring rail actions (36×36, 16px icon), so it stays aligned
+   in the narrow column instead of sticking out wider/off-center. */
+.dsh-quota-trigger--icon { width: 36px; height: 36px; padding: 0; gap: 0; }
+.dsh-quota-trigger--icon .dsh-quota-triggerIcon svg { width: 16px; height: 16px; }
+/* Sidebar rail layout fix: the shell keeps its footer actions in a horizontal
+   row even when collapsed, which leaves injected actions floating beside its
+   vertically stacked rail entries. Stack the row instead, so this trigger
+   joins the rail column. Matches via the stable data-slot / data-rail hooks
+   (not hashed class names); if the shell changes, the rule harmlessly stops
+   matching and the layout falls back to the shell default. */
+div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
+  flex-direction: column;
+  align-items: center;
+}
 .dsh-quota-triggerIcon { flex: none; display: inline-flex; }
+/* Failure badge floats on the trigger corner instead of taking layout space,
+   so it never pushes the icon (collapsed) or label (expanded) off-center. */
 .dsh-quota-errorDot {
+  position: absolute; top: 3px; right: 3px;
   width: 6px; height: 6px; border-radius: 50%; background: #d94f4f; flex: none;
 }
 .dsh-quota-panel {
@@ -100,10 +121,16 @@ const CSS = `
 
 const TAG_ID = 'dsh-provider-quota/panel.css'
 
-/** Inject the panel stylesheet once; idempotent under HMR re-evaluation. */
+/** Inject the panel stylesheet once; on HMR swap, refresh the existing tag's payload in place. */
 export function ensureStyles(): void {
   if (typeof document === 'undefined') return
-  if (document.querySelector('style[data-plugin-css=' + JSON.stringify(TAG_ID) + ']') !== null) return
+  const existing = document.querySelector('style[data-plugin-css=' + JSON.stringify(TAG_ID) + ']')
+  if (existing !== null) {
+    // A hot-swapped bundle re-runs this module while the old <style> tag is
+    // still in the DOM — sync its content so the new CSS actually applies.
+    if (existing.textContent !== CSS) existing.textContent = CSS
+    return
+  }
   const tag = document.createElement('style')
   tag.dataset.plugin = 'dsh-provider-quota'
   tag.dataset.pluginCss = TAG_ID

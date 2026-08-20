@@ -356,7 +356,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
       <button
         ref={triggerRef}
         type="button"
-        className="dsh-quota-trigger"
+        className={wide ? 'dsh-quota-trigger' : 'dsh-quota-trigger dsh-quota-trigger--icon'}
         aria-expanded={open}
         aria-label={tt('action.aria')}
         title={tt('action.aria')}
