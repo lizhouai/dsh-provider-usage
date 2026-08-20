@@ -4,17 +4,6 @@
  */
 const CSS = `
 .dsh-quota-root { position: relative; display: inline-flex; }
-.dsh-quota-trigger {
-  position: relative; flex: none; min-height: 28px; cursor: pointer; background-color: transparent; border: 0; border-radius: 6px;
-  align-items: center; justify-content: center; gap: 4px; padding: 3px 6px;
-  font-size: 12px; line-height: 18px; display: inline-flex;
-  color: var(--dsw-alias-label-tertiary);
-  transition: box-shadow 0.15s;
-}
-.dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible {
-  color: var(--dsw-alias-label-secondary);
-  background-color: var(--dsw-alias-fill-l2);
-}
 /* Tri-tone health halo: only the shadow carries the worst provider state
    (green ok / amber remaining<30% / red error or usage>=90%) — the button
    face itself stays neutral. A 1px tone ring plus a soft halo keeps the
@@ -22,38 +11,11 @@ const CSS = `
 .dsh-quota-tone-ok { --dsh-quota-tone: #22a06b; }
 .dsh-quota-tone-warn { --dsh-quota-tone: #e2b93b; }
 .dsh-quota-tone-danger { --dsh-quota-tone: #d94f4f; }
-.dsh-quota-trigger, .dsh-quota-ball {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--dsh-quota-tone) 35%, transparent),
-    0 2px 10px color-mix(in srgb, var(--dsh-quota-tone) 45%, transparent);
-}
-.dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible,
-.dsh-quota-ball:hover, .dsh-quota-ball:focus-visible {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--dsh-quota-tone) 50%, transparent),
-    0 2px 14px color-mix(in srgb, var(--dsh-quota-tone) 60%, transparent);
-}
-/* Collapsed sidebar: a centered square icon button with the same footprint
-   as the neighboring rail actions (36×36, 16px icon), so it stays aligned
-   in the narrow column instead of sticking out wider/off-center. */
-.dsh-quota-trigger--icon { width: 36px; height: 36px; padding: 0; gap: 0; }
-.dsh-quota-trigger--icon .dsh-quota-triggerIcon svg { width: 16px; height: 16px; }
-/* Sidebar rail layout fix: the shell keeps its footer actions in a horizontal
-   row even when collapsed, which leaves injected actions floating beside its
-   vertically stacked rail entries. Stack the row instead, so this trigger
-   joins the rail column. Matches via the stable data-slot / data-rail hooks
-   (not hashed class names); if the shell changes, the rule harmlessly stops
-   matching and the layout falls back to the shell default. */
-div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
-  flex-direction: column;
-  align-items: center;
-}
-.dsh-quota-triggerIcon { flex: none; display: inline-flex; }
 /* Floating ball trigger: a draggable fixed circle portaled to document.body,
    one layer below the panel (1000) so the popover always covers it. Position
-   comes from inline style: docked it pins to a viewport edge, while dragging
-   it follows the cursor. Keeps the shell's lv3 lift shadow; the tone halo
-   stacks on top via the shared glow rule above. */
+   comes from inline style: docked it sits at its stored coordinates, while
+   dragging it follows the cursor. Keeps the shell's lv3 lift shadow; the
+   tone halo stacks on top. */
 .dsh-quota-ball {
   position: fixed; z-index: 999; width: 40px; height: 40px; border-radius: 50%;
   cursor: pointer; touch-action: none;
@@ -72,6 +34,17 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
     var(--dsw-shadow-lv3),
     0 0 0 1px color-mix(in srgb, var(--dsh-quota-tone) 40%, transparent),
     0 0 14px color-mix(in srgb, var(--dsh-quota-tone) 55%, transparent);
+}
+.dsh-quota-ball.dsh-quota-tone-ok:hover,
+.dsh-quota-ball.dsh-quota-tone-warn:hover,
+.dsh-quota-ball.dsh-quota-tone-danger:hover,
+.dsh-quota-ball.dsh-quota-tone-ok:focus-visible,
+.dsh-quota-ball.dsh-quota-tone-warn:focus-visible,
+.dsh-quota-ball.dsh-quota-tone-danger:focus-visible {
+  box-shadow:
+    var(--dsw-shadow-lv3),
+    0 0 0 1px color-mix(in srgb, var(--dsh-quota-tone) 55%, transparent),
+    0 0 18px color-mix(in srgb, var(--dsh-quota-tone) 70%, transparent);
 }
 .dsh-quota-panel {
   z-index: 1000; box-sizing: border-box;
@@ -112,15 +85,13 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
 }
 .dsh-quota-refresh:hover { color: var(--dsw-alias-label-secondary); }
 .dsh-quota-refresh:disabled { opacity: 0.5; cursor: default; }
-/* Display-mode toggle in the panel head; highlighted while any floating
-   surface is enabled. */
-.dsh-quota-mode {
+/* Home button in the panel head: sends the ball back to its default spot. */
+.dsh-quota-home {
   cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: 6px; background: 0; padding: 4px;
   color: var(--dsw-alias-label-tertiary); line-height: 0;
 }
-.dsh-quota-mode:hover { color: var(--dsw-alias-label-secondary); }
-.dsh-quota-mode--active { color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-fill-l2); }
+.dsh-quota-home:hover { color: var(--dsw-alias-label-secondary); }
 @keyframes dsh-quota-spin { to { transform: rotate(360deg); } }
 .dsh-quota-refresh--loading svg { animation: dsh-quota-spin 0.9s linear infinite; }
 .dsh-quota-card {
