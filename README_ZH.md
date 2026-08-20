@@ -68,16 +68,15 @@ dsh plugin --profile web add dsh-provider-usage@latest
 
 ## 配置说明
 
-默认开箱即用：自动探测当前 profile 的所有 provider 路由。也可以在 `~/.dsh/profiles/web/cordis.patch.yml` 中调整：
+默认开箱即用：自动探测当前 profile 的所有 provider 路由。也可以在 `~/.dsh/profiles/web/cordis.patch.yml` 中调整——**按 id 覆盖**包内 bundle 已挂载的行（包自带的 bundle patch 已经 insert 过该行，再 insert 一次相同 id 会导致启动报 `duplicate loader entry id`）：
 
 ```yaml
-- insert:
-    - id: provider-usage
-      name: dsh-provider-usage
-      config:
-        refreshSeconds: 60   # 面板默认刷新周期（秒）
-        autoDetect: true     # 自动枚举 llm 注册表中的 provider
-        providers: []        # 手动补充/覆盖 provider（id 相同则覆盖自动探测结果）
+- id: provider-usage
+  name: dsh-provider-usage
+  config:
+    refreshSeconds: 60   # 面板默认刷新周期（秒）
+    autoDetect: true     # 自动枚举 llm 注册表中的 provider
+    providers: []        # 手动补充/覆盖 provider（id 相同则覆盖自动探测结果）
 ```
 
 | 字段 | 类型 | 默认 | 说明 |

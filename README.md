@@ -68,16 +68,15 @@ Then restart `dsh web` and refresh the page. If the release you want was publish
 
 ## Configuration
 
-Defaults work out of the box: the plugin auto-detects every provider route of the active profile. A trusted profile can tune behavior in `~/.dsh/profiles/web/cordis.patch.yml`:
+Defaults work out of the box: the plugin auto-detects every provider route of the active profile. A trusted profile can tune behavior in `~/.dsh/profiles/web/cordis.patch.yml` — **override the bundle's row by id** (the package's own bundle patch already inserts it; a second `insert` of the same id fails the boot with `duplicate loader entry id`):
 
 ```yaml
-- insert:
-    - id: provider-usage
-      name: dsh-provider-usage
-      config:
-        refreshSeconds: 60   # suggested panel refresh interval (5–86400)
-        autoDetect: true     # enumerate provider routes from the llm registry
-        providers: []        # manual specs; an id matching a detected route overrides it
+- id: provider-usage
+  name: dsh-provider-usage
+  config:
+    refreshSeconds: 60   # suggested panel refresh interval (5–86400)
+    autoDetect: true     # enumerate provider routes from the llm registry
+    providers: []        # manual specs; an id matching a detected route overrides it
 ```
 
 | Field | Type | Default | Description |
