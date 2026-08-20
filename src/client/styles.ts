@@ -36,6 +36,22 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
   position: absolute; top: 3px; right: 3px;
   width: 6px; height: 6px; border-radius: 50%; background: #d94f4f; flex: none;
 }
+/* Floating ball trigger: a draggable fixed circle portaled to document.body,
+   one layer below the panel (1000) so the popover always covers it. Position
+   comes from inline style: docked it pins to a viewport edge, while dragging
+   it follows the cursor. */
+.dsh-quota-ball {
+  position: fixed; z-index: 999; width: 40px; height: 40px; border-radius: 50%;
+  cursor: pointer; touch-action: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv3);
+  color: var(--dsw-alias-label-tertiary);
+}
+.dsh-quota-ball:hover, .dsh-quota-ball:focus-visible { color: var(--dsw-alias-label-secondary); }
+.dsh-quota-ball svg { width: 18px; height: 18px; }
+.dsh-quota-ball .dsh-quota-errorDot { top: 2px; right: 2px; }
 .dsh-quota-panel {
   z-index: 1000; box-sizing: border-box;
   border: 1px solid var(--dsw-alias-border-l2);
@@ -75,6 +91,15 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
 }
 .dsh-quota-refresh:hover { color: var(--dsw-alias-label-secondary); }
 .dsh-quota-refresh:disabled { opacity: 0.5; cursor: default; }
+/* Display-mode toggle in the panel head; highlighted while any floating
+   surface is enabled. */
+.dsh-quota-mode {
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: 0; padding: 4px;
+  color: var(--dsw-alias-label-tertiary); line-height: 0;
+}
+.dsh-quota-mode:hover { color: var(--dsw-alias-label-secondary); }
+.dsh-quota-mode--active { color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-fill-l2); }
 @keyframes dsh-quota-spin { to { transform: rotate(360deg); } }
 .dsh-quota-refresh--loading svg { animation: dsh-quota-spin 0.9s linear infinite; }
 .dsh-quota-card {

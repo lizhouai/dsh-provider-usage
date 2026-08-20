@@ -3,6 +3,8 @@
  * popover panel listing every configured provider's live balance/quota.
  * Polling interval is user-selectable (persisted in localStorage) and falls
  * back to the deployment-suggested value from the host plugin config.
+ * The trigger can also live as a draggable floating ball (or both surfaces
+ * at once), switched from the panel head and persisted in localStorage.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -62,9 +64,23 @@ export interface QuotaActionProps {
 const INTERVAL_OPTIONS = [15, 30, 60, 300, 900, 1800] as const
 const STORAGE_KEY = 'dsh.provider-quota.refreshSeconds'
 const LANG_KEY = 'dsh.provider-quota.lang'
+const MODE_KEY = 'dsh.provider-quota.mode'
+const POS_KEY = 'dsh.provider-quota.floatPos'
 const DEFAULT_INTERVAL = 60
 
+/** Floating ball diameter in px; drag math derives from it. */
+const BALL_SIZE = 40
+
 type Lang = 'zh' | 'en'
+/** Trigger surface: sidebar button, floating ball, or both. */
+type Mode = 'sidebar' | 'float' | 'both'
+/** Which trigger surface the open panel is anchored to. */
+type Anchor = 'sidebar' | 'float'
+/** Docked ball position: viewport edge plus offset from the top. */
+interface FloatPos {
+  side: 'left' | 'right'
+  top: number
+}
 
 /** Panel-level override stored in localStorage; null means follow the harness language. */
 function readStoredLang(): Lang | null {
@@ -107,6 +123,52 @@ function readStoredInterval(): number | null {
 function storeInterval(value: number): void {
   try {
     localStorage.setItem(STORAGE_KEY, String(value))
+  } catch {
+    /* storage unavailable: keep the in-memory value only */
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Display mode + floating ball position
+ * ------------------------------------------------------------------ */
+
+function readStoredMode(): Mode {
+  try {
+    const raw = localStorage.getItem(MODE_KEY)
+    return raw === 'float' || raw === 'both' ? raw : 'sidebar'
+  } catch {
+    return 'sidebar'
+  }
+}
+
+function storeMode(mode: Mode): void {
+  try {
+    localStorage.setItem(MODE_KEY, mode)
+  } catch {
+    /* storage unavailable: keep the in-memory value only */
+  }
+}
+
+function defaultFloatPos(): FloatPos {
+  return { side: 'right', top: Math.round(window.innerHeight * 0.6) }
+}
+
+function readStoredFloatPos(): FloatPos {
+  try {
+    const raw = localStorage.getItem(POS_KEY)
+    if (raw === null) return defaultFloatPos()
+    const parsed = JSON.parse(raw) as Partial<FloatPos> | null
+    if (parsed === null || (parsed.side !== 'left' && parsed.side !== 'right')) return defaultFloatPos()
+    if (typeof parsed.top !== 'number' || !Number.isFinite(parsed.top)) return defaultFloatPos()
+    return { side: parsed.side, top: parsed.top }
+  } catch {
+    return defaultFloatPos()
+  }
+}
+
+function storeFloatPos(pos: FloatPos): void {
+  try {
+    localStorage.setItem(POS_KEY, JSON.stringify(pos))
   } catch {
     /* storage unavailable: keep the in-memory value only */
   }
@@ -243,6 +305,19 @@ function GlobeIcon() {
   )
 }
 
+function MoveIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 9l-3 3 3 3" />
+      <path d="M9 5l3-3 3 3" />
+      <path d="M15 19l-3 3-3-3" />
+      <path d="M19 9l3 3-3 3" />
+      <path d="M2 12h20" />
+      <path d="M12 2v20" />
+    </svg>
+  )
+}
+
 export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<QuotaListResult | null>(null)
@@ -251,6 +326,11 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
   const [intervalSec, setIntervalSec] = useState(() => readStoredInterval() ?? DEFAULT_INTERVAL)
   const [langOverride, setLangOverride] = useState<Lang | null>(() => readStoredLang())
   const [now, setNow] = useState(() => Date.now())
+  const [mode, setMode] = useState<Mode>(() => readStoredMode())
+  const [anchor, setAnchor] = useState<Anchor>('sidebar')
+  const [floatPos, setFloatPos] = useState<FloatPos>(() => readStoredFloatPos())
+  /** Transient ball position while dragging (cursor-centered); null when docked. */
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
 
   // Follow the harness language by default: probe the shell-injected
   // translator with a known key, then let a panel-level override win.
@@ -265,11 +345,24 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
       return next
     })
   }, [harnessLang])
-  const [panelPos, setPanelPos] = useState<{ left: number; bottom: number } | null>(null)
+  // Cycle sidebar → float → both; float hides the sidebar trigger, so an
+  // open panel anchored there must re-anchor to the ball.
+  const toggleMode = () => {
+    const next: Mode = mode === 'sidebar' ? 'float' : mode === 'float' ? 'both' : 'sidebar'
+    storeMode(next)
+    setMode(next)
+    if (next === 'float' && open && anchor === 'sidebar') setAnchor('float')
+  }
+  const [panelPos, setPanelPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const ballRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const inFlight = useRef(false)
+  /** Active ball-drag session; cleared on pointerup/pointercancel. */
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; dragging: boolean } | null>(null)
+  /** Set when a drag ends so the trailing click does not toggle the panel. */
+  const suppressClickRef = useRef(false)
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return
@@ -315,12 +408,14 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
   }, [open])
 
   // Close on outside press / Escape, mirroring the shipped popover behavior.
-  // The panel is portaled to document.body, so both trees count as inside.
+  // The panel and the ball are portaled to document.body, so all trees count
+  // as inside.
   useEffect(() => {
     if (!open) return
     const closeOutside = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return
       if (rootRef.current?.contains(event.target)) return
+      if (ballRef.current?.contains(event.target)) return
       if (panelRef.current?.contains(event.target)) return
       setOpen(false)
     }
@@ -328,20 +423,43 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
     return () => document.removeEventListener('pointerdown', closeOutside)
   }, [open])
 
-  // Anchor the fixed-position panel above the trigger; recompute while open
-  // so sidebar collapse and window resizes keep it attached.
+  // Anchor the fixed-position panel to the active trigger (sidebar button or
+  // floating ball); recompute while open so sidebar collapse and window
+  // resizes keep it attached. Triggers in the lower half of the viewport open
+  // the panel above them, upper-half triggers below.
   useEffect(() => {
     if (!open) return
     const update = () => {
-      const rect = triggerRef.current?.getBoundingClientRect()
+      const rect = (anchor === 'float' ? ballRef.current : triggerRef.current)?.getBoundingClientRect()
       if (!rect) return
       const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 336))
-      setPanelPos({ left, bottom: window.innerHeight - rect.top + 6 })
+      setPanelPos(
+        rect.top > window.innerHeight / 2
+          ? { left, bottom: window.innerHeight - rect.top + 6 }
+          : { left, top: rect.bottom + 6 },
+      )
     }
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
-  }, [open, wide])
+  }, [open, wide, anchor])
+
+  // Keep the docked ball inside the viewport across window resizes.
+  useEffect(() => {
+    if (mode === 'sidebar') return
+    const clampTop = () => {
+      setFloatPos((current) => {
+        const top = Math.min(Math.max(8, current.top), window.innerHeight - BALL_SIZE - 8)
+        if (top === current.top) return current
+        const next = { ...current, top }
+        storeFloatPos(next)
+        return next
+      })
+    }
+    clampTop()
+    window.addEventListener('resize', clampTop)
+    return () => window.removeEventListener('resize', clampTop)
+  }, [mode])
 
   const hasFailure = error !== null || (data?.providers.some((p) => p.status === 'error' || p.status === 'missing-credential') ?? false)
 
@@ -351,25 +469,116 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
     setOpen(false)
   }
 
+  /* Ball dragging: pointer events only (touch included via touch-action:
+     none). A press becomes a drag past a 5px dead zone; while dragging the
+     ball follows the cursor centered on it, and on release it snaps to the
+     nearer viewport edge. A plain press falls through to the click handler. */
+  const onBallPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, dragging: false }
+  }
+
+  const onBallPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current
+    if (drag === null || drag.pointerId !== event.pointerId) return
+    if (!drag.dragging) {
+      if (Math.abs(event.clientX - drag.startX) < 5 && Math.abs(event.clientY - drag.startY) < 5) return
+      drag.dragging = true
+      // The panel would detach from a moving anchor: close it on drag start.
+      if (open && anchor === 'float') setOpen(false)
+    }
+    const half = BALL_SIZE / 2
+    setDragPos({
+      x: Math.min(Math.max(half, event.clientX), window.innerWidth - half),
+      y: Math.min(Math.max(half, event.clientY), window.innerHeight - half),
+    })
+  }
+
+  const endBallDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current
+    dragRef.current = null
+    if (drag === null || drag.pointerId !== event.pointerId || !drag.dragging) return
+    const half = BALL_SIZE / 2
+    const x = Math.min(Math.max(half, event.clientX), window.innerWidth - half)
+    const y = Math.min(Math.max(half, event.clientY), window.innerHeight - half)
+    const next: FloatPos = {
+      side: x <= window.innerWidth / 2 ? 'left' : 'right',
+      top: Math.min(Math.max(8, y - half), window.innerHeight - BALL_SIZE - 8),
+    }
+    setFloatPos(next)
+    storeFloatPos(next)
+    setDragPos(null)
+    suppressClickRef.current = true
+  }
+
+  const cancelBallDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return
+    dragRef.current = null
+    setDragPos(null)
+  }
+
+  const onBallClick = () => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
+    setAnchor('float')
+    setNow(Date.now())
+    setOpen((current) => !current)
+    if (!open) refresh()
+  }
+
   return (
     <div ref={rootRef} className="dsh-quota-root" onKeyDown={onKeyDown}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={wide ? 'dsh-quota-trigger' : 'dsh-quota-trigger dsh-quota-trigger--icon'}
-        aria-expanded={open}
-        aria-label={tt('action.aria')}
-        title={tt('action.aria')}
-        onClick={() => {
-          setNow(Date.now())
-          setOpen((current) => !current)
-          if (!open) refresh()
-        }}
-      >
-        <span className="dsh-quota-triggerIcon"><CoinIcon /></span>
-        {wide ? <span>{tt('action.label')}</span> : null}
-        {hasFailure ? <span className="dsh-quota-errorDot" /> : null}
-      </button>
+      {mode !== 'float' ? (
+        <button
+          ref={triggerRef}
+          type="button"
+          className={wide ? 'dsh-quota-trigger' : 'dsh-quota-trigger dsh-quota-trigger--icon'}
+          aria-expanded={open && anchor === 'sidebar'}
+          aria-label={tt('action.aria')}
+          title={tt('action.aria')}
+          onClick={() => {
+            setAnchor('sidebar')
+            setNow(Date.now())
+            setOpen((current) => !current)
+            if (!open) refresh()
+          }}
+        >
+          <span className="dsh-quota-triggerIcon"><CoinIcon /></span>
+          {wide ? <span>{tt('action.label')}</span> : null}
+          {hasFailure ? <span className="dsh-quota-errorDot" /> : null}
+        </button>
+      ) : null}
+      {mode !== 'sidebar'
+        ? createPortal(
+          <button
+            ref={ballRef}
+            type="button"
+            className="dsh-quota-ball"
+            style={
+              dragPos !== null
+                ? { left: dragPos.x - BALL_SIZE / 2, top: dragPos.y - BALL_SIZE / 2 }
+                : floatPos.side === 'left'
+                  ? { left: 8, top: floatPos.top }
+                  : { right: 8, top: floatPos.top }
+            }
+            aria-expanded={open && anchor === 'float'}
+            aria-label={tt('action.aria')}
+            title={tt('action.aria')}
+            onPointerDown={onBallPointerDown}
+            onPointerMove={onBallPointerMove}
+            onPointerUp={endBallDrag}
+            onPointerCancel={cancelBallDrag}
+            onClick={onBallClick}
+            onKeyDown={onKeyDown}
+          >
+            <CoinIcon />
+            {hasFailure ? <span className="dsh-quota-errorDot" /> : null}
+          </button>,
+          document.body,
+        )
+        : null}
       {open && panelPos !== null
         ? createPortal(
           <div
@@ -377,12 +586,21 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
             className="dsh-quota-panel"
             role="dialog"
             aria-label={tt('panel.title')}
-            style={{ left: panelPos.left, bottom: panelPos.bottom }}
+            style={{ left: panelPos.left, top: panelPos.top, bottom: panelPos.bottom }}
             onKeyDown={onKeyDown}
           >
           <div className="dsh-quota-head">
             <span className="dsh-quota-title">{tt('panel.title')}</span>
             {data?.version ? <span className="dsh-quota-version">v{data.version}</span> : null}
+            <button
+              type="button"
+              className={`dsh-quota-mode${mode !== 'sidebar' ? ' dsh-quota-mode--active' : ''}`}
+              onClick={toggleMode}
+              title={`${tt('panel.mode')}: ${tt(`mode.${mode}`)}`}
+              aria-label={`${tt('panel.mode')}: ${tt(`mode.${mode}`)}`}
+            >
+              <MoveIcon />
+            </button>
             <button
               type="button"
               className="dsh-quota-lang"
