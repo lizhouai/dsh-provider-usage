@@ -561,7 +561,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
         <button
           ref={triggerRef}
           type="button"
-          className={wide ? 'dsh-quota-trigger' : 'dsh-quota-trigger dsh-quota-trigger--icon'}
+          className={`dsh-quota-trigger dsh-quota-tone-${tone}${wide ? '' : ' dsh-quota-trigger--icon'}`}
           aria-expanded={open && anchor === 'sidebar'}
           aria-label={tt('action.aria')}
           title={`${tt('action.aria')} · ${tt(`status.tone.${tone}`)}`}
@@ -574,9 +574,6 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
         >
           <span className="dsh-quota-triggerIcon"><CoinIcon /></span>
           {wide ? <span>{tt('action.label')}</span> : null}
-          {/* Collapsed rail: always show the health dot (it's the only status
-              surface); expanded: only surface warn/danger to stay quiet. */}
-          {(!wide || tone !== 'ok') ? <span className={`dsh-quota-statusDot dsh-quota-statusDot--${tone}`} /> : null}
         </button>
       ) : null}
       {mode !== 'sidebar'
@@ -584,7 +581,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
           <button
             ref={ballRef}
             type="button"
-            className="dsh-quota-ball"
+            className={`dsh-quota-ball dsh-quota-tone-${tone}`}
             style={
               dragPos !== null
                 ? { left: dragPos.x - BALL_SIZE / 2, top: dragPos.y - BALL_SIZE / 2 }
@@ -603,8 +600,6 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
             onKeyDown={onKeyDown}
           >
             <CoinIcon />
-            {/* The ball is a standalone surface: health dot always on. */}
-            <span className={`dsh-quota-statusDot dsh-quota-statusDot--${tone}`} />
           </button>,
           document.body,
         )

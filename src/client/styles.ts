@@ -5,14 +5,36 @@
 const CSS = `
 .dsh-quota-root { position: relative; display: inline-flex; }
 .dsh-quota-trigger {
-  position: relative; flex: none; min-height: 28px; cursor: pointer; background: 0; border: 0; border-radius: 6px;
+  position: relative; flex: none; min-height: 28px; cursor: pointer; background-color: transparent; border: 0; border-radius: 6px;
   align-items: center; justify-content: center; gap: 4px; padding: 3px 6px;
   font-size: 12px; line-height: 18px; display: inline-flex;
   color: var(--dsw-alias-label-tertiary);
+  transition: box-shadow 0.15s;
 }
 .dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible {
   color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-fill-l2);
+}
+/* Tri-tone health glow: the trigger background itself carries the worst
+   provider state — green ok / amber remaining<30% / red error or usage>=90%.
+   A top-lit gradient plus a soft halo echoes the shell's floating power
+   button (lifted surface + drop shadow). color-mix keeps it readable on
+   both light and dark skins. */
+.dsh-quota-tone-ok { --dsh-quota-tone: #22a06b; }
+.dsh-quota-tone-warn { --dsh-quota-tone: #e2b93b; }
+.dsh-quota-tone-danger { --dsh-quota-tone: #d94f4f; }
+.dsh-quota-trigger, .dsh-quota-ball {
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--dsh-quota-tone) 8%, transparent),
+    color-mix(in srgb, var(--dsh-quota-tone) 22%, transparent));
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--dsh-quota-tone) 22%, transparent),
+    0 4px 14px color-mix(in srgb, var(--dsh-quota-tone) 26%, transparent);
+}
+.dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible,
+.dsh-quota-ball:hover, .dsh-quota-ball:focus-visible {
+  background-image: linear-gradient(180deg,
+    color-mix(in srgb, var(--dsh-quota-tone) 14%, transparent),
+    color-mix(in srgb, var(--dsh-quota-tone) 30%, transparent));
 }
 /* Collapsed sidebar: a centered square icon button with the same footprint
    as the neighboring rail actions (36×36, 16px icon), so it stays aligned
@@ -30,32 +52,29 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
   align-items: center;
 }
 .dsh-quota-triggerIcon { flex: none; display: inline-flex; }
-/* Health badge floats on the trigger corner instead of taking layout space,
-   so it never pushes the icon (collapsed) or label (expanded) off-center.
-   Color encodes the worst provider state, mirroring the usage bar tones. */
-.dsh-quota-statusDot {
-  position: absolute; top: 3px; right: 3px;
-  width: 6px; height: 6px; border-radius: 50%; flex: none;
-}
-.dsh-quota-statusDot--ok { background: #22a06b; }
-.dsh-quota-statusDot--warn { background: #e2b93b; }
-.dsh-quota-statusDot--danger { background: #d94f4f; }
 /* Floating ball trigger: a draggable fixed circle portaled to document.body,
    one layer below the panel (1000) so the popover always covers it. Position
    comes from inline style: docked it pins to a viewport edge, while dragging
-   it follows the cursor. */
+   it follows the cursor. Keeps the shell's lv3 lift shadow; the tone halo
+   stacks on top via the shared glow rule above. */
 .dsh-quota-ball {
   position: fixed; z-index: 999; width: 40px; height: 40px; border-radius: 50%;
   cursor: pointer; touch-action: none;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-specific-menu);
-  box-shadow: var(--dsw-shadow-lv3);
+  background-color: var(--dsw-specific-menu);
   color: var(--dsw-alias-label-tertiary);
+  transition: box-shadow 0.15s;
 }
 .dsh-quota-ball:hover, .dsh-quota-ball:focus-visible { color: var(--dsw-alias-label-secondary); }
 .dsh-quota-ball svg { width: 18px; height: 18px; }
-.dsh-quota-ball .dsh-quota-statusDot { top: 2px; right: 2px; }
+.dsh-quota-ball.dsh-quota-tone-ok,
+.dsh-quota-ball.dsh-quota-tone-warn,
+.dsh-quota-ball.dsh-quota-tone-danger {
+  box-shadow:
+    var(--dsw-shadow-lv3),
+    0 0 14px color-mix(in srgb, var(--dsh-quota-tone) 45%, transparent);
+}
 .dsh-quota-panel {
   z-index: 1000; box-sizing: border-box;
   border: 1px solid var(--dsw-alias-border-l2);
