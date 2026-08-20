@@ -10,7 +10,7 @@
 
 # dsh-provider-quota
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件：在 Web GUI 侧边栏底部实时显示所有已配置 LLM provider 的账户额度——不用再逐个登录 provider 控制台确认余额。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件：在 Web GUI 上悬浮一个可任意拖动的额度球，实时查看所有已配置 LLM provider 的账户额度——不用再逐个登录 provider 控制台确认余额。
 
 ## 功能
 
@@ -20,7 +20,7 @@
   - **Kimi Code 订阅**（`kimi-coding`）→ `GET {baseURL}/v1/usages`（每周配额及各限速窗口，含重置倒计时）
   - **Moonshot 开放平台**（`moonshotai-cn` / `moonshotai`）→ `GET {baseURL}/users/me/balance`
 - **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。
-- **侧边栏入口** —— 侧边栏底部按钮点击弹出额度面板；任一 provider 异常时按钮显示红点。
+- **悬浮球入口** —— 可任意拖动的悬浮球点击弹出额度面板，面板头部的归位按钮可一键回到默认位置；球体光晕表达健康度：绿色全部正常、黄色有配额剩余不足 30%、红色查询失败/缺密钥/用量 ≥90%。
 - **版本徽章** —— 面板标题旁显示当前运行的插件版本，一眼确认加载的是哪个发布版。
 - **中英双语** —— 面板内置中英文界面，默认跟随 harness 系统语言，标题栏按钮一键切换（localStorage 持久化）。
 - **刷新周期可调** —— 面板内调整（15s–30min，localStorage 持久化），默认值由插件配置提供。

@@ -10,7 +10,7 @@
 
 # dsh-provider-quota
 
-**Every provider's balance, one glance away.** A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that shows the live account balance / quota of every configured LLM provider in the Web GUI sidebar — no more logging into each provider console to check whether you are about to run out of credit mid-session.
+**Every provider's balance, one glance away.** A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that floats a draggable quota ball over the Web GUI — no more logging into each provider console to check whether you are about to run out of credit mid-session.
 
 ## Features
 
@@ -20,7 +20,7 @@
   - **Kimi Code subscription** (`kimi-coding`) → `GET {baseURL}/v1/usages` (weekly quota and rate-limit windows, with reset countdown)
   - **Moonshot open platform** (`moonshotai-cn` / `moonshotai`) → `GET {baseURL}/users/me/balance`
 - **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk.
-- **Sidebar widget** — an entry button in the sidebar footer opens the quota panel; the button shows a red dot when any provider errors out.
+- **Floating ball widget** — a draggable floating ball opens the quota panel; drop it anywhere, and a home button in the panel sends it back to its default spot. The halo around the ball encodes provider health: green all good, amber some quota below 30% left, red on query failure / missing key / usage ≥90%.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
 - **Bilingual panel** — built-in Chinese/English UI; follows the harness language by default, with a one-click toggle in the panel header (persisted in localStorage).
 - **Configurable refresh** — adjustable in the panel (15s–30min, persisted in localStorage); the default comes from the plugin config.
