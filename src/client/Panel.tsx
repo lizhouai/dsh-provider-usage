@@ -125,12 +125,14 @@ function storeInterval(value: number): void {
  * Floating ball position
  * ------------------------------------------------------------------ */
 
+/** Equal margin from the chat area's left edge and the window's bottom edge. */
+const DOCK_MARGIN = 24
+
 function defaultFloatPos(): FloatPos {
-  // Bottom-left of the chat area: just right of the sidebar edge, level with
-  // the composer send row. Recomputed on every reset, so 归位 follows both
-  // the composer (welcome screen vs conversation view) and sidebar collapse.
-  // The sidebar edge comes from the full-height ancestor of the settings slot
-  // (stable data-slot hook; class names are build-hashed).
+  // Bottom-left of the main chat area with equal margins on both axes. The
+  // chat area's left edge is the sidebar's right edge, derived from the
+  // full-height ancestor of the settings slot (stable data-slot hook; class
+  // names are build-hashed), so it adapts to sidebar collapse.
   let sidebarRight = 264
   let node = document.querySelector('[data-slot="sidebar.settings"]')?.parentElement ?? null
   while (node) {
@@ -141,13 +143,7 @@ function defaultFloatPos(): FloatPos {
     }
     node = node.parentElement
   }
-  const send = document
-    .querySelector('button[aria-label="发送消息"], button[aria-label="Send message"], button[aria-label="Send"]')
-    ?.getBoundingClientRect()
-  const y = send && send.width > 0
-    ? Math.round(send.top + send.height / 2 - BALL_SIZE / 2)
-    : window.innerHeight - 100 - BALL_SIZE
-  return { x: Math.round(sidebarRight + 16), y }
+  return { x: Math.round(sidebarRight + DOCK_MARGIN), y: window.innerHeight - DOCK_MARGIN - BALL_SIZE }
 }
 
 function readStoredFloatPos(): FloatPos | null {
@@ -340,10 +336,6 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
   const [langOverride, setLangOverride] = useState<Lang | null>(() => readStoredLang())
   const [now, setNow] = useState(() => Date.now())
   const [floatPos, setFloatPos] = useState<FloatPos>(() => readStoredFloatPos() ?? defaultFloatPos())
-  /** True once the position comes from storage/drag/reset — the default
-      anchors to the composer send button, which mounts after this plugin,
-      so an unpinned ball re-anchors as soon as the composer appears. */
-  const posPinned = useRef(readStoredFloatPos() !== null)
   /** Transient ball position while dragging (cursor-centered); null when docked. */
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
 
@@ -365,7 +357,6 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     const next = defaultFloatPos()
     storeFloatPos(next)
     setFloatPos(next)
-    posPinned.current = true
   }
   const [panelPos, setPanelPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -473,23 +464,6 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     return () => window.removeEventListener('resize', clampPos)
   }, [])
 
-  // First run (no stored position): the default anchors to the composer send
-  // button, which mounts after this plugin — poll briefly until it appears.
-  useEffect(() => {
-    if (posPinned.current) return
-    let tries = 0
-    const timer = setInterval(() => {
-      tries += 1
-      if (posPinned.current || tries > 20) {
-        clearInterval(timer)
-        return
-      }
-      const next = defaultFloatPos()
-      setFloatPos((current) => (current.x === next.x && current.y === next.y ? current : next))
-    }, 400)
-    return () => clearInterval(timer)
-  }, [])
-
   const tone = healthTone(data, error)
 
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -535,7 +509,6 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     setFloatPos(next)
     storeFloatPos(next)
     setDragPos(null)
-    posPinned.current = true
     suppressClickRef.current = true
   }
 
