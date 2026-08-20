@@ -10,7 +10,7 @@
 
 # dsh-provider-usage
 
-**Every provider's balance, one glance away.** A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that floats a draggable quota ball over the Web GUI — no more logging into each provider console to check whether you are about to run out of credit mid-session.
+**Every provider's balance, one glance away.** A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that floats a small draggable usage ball over the Web GUI — no more logging into each provider console to check whether you are about to run out of credit mid-session.
 
 ## Features
 
@@ -20,7 +20,7 @@
   - **Kimi Code subscription** (`kimi-coding`) → `GET {baseURL}/v1/usages` (weekly quota and rate-limit windows, with reset countdown)
   - **Moonshot open platform** (`moonshotai-cn` / `moonshotai`) → `GET {baseURL}/users/me/balance`
 - **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk.
-- **Floating ball widget** — a draggable floating ball opens the quota panel; drop it anywhere, and a home button in the panel sends it back to its default spot. The halo around the ball encodes provider health: green all good, amber some quota below 30% left, red on query failure / missing key / usage ≥90%.
+- **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The halo around the ball encodes provider health: green all good, amber some quota below 30% left, red on query failure / missing key / usage ≥90%.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
 - **Bilingual panel** — built-in Chinese/English UI; follows the harness language by default, with a one-click toggle in the panel header (persisted in localStorage).
 - **Configurable refresh** — adjustable in the panel (15s–30min, persisted in localStorage); the default comes from the plugin config.
@@ -28,7 +28,9 @@
 
 ## Screenshots
 
-![Quota panel in English](docs/panel-en.png)
+The floating ball (bottom-left, with the green healthy halo) and the open usage panel:
+
+![Usage panel in English](docs/panel-en.png)
 
 ## Install
 
@@ -62,7 +64,7 @@ Restart `dsh web` after changing the plugin set (a plugin add/remove requires a 
 dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
-Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-usage@0.1.5`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
+Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-usage@0.3.1`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
 
 ## Configuration
 
@@ -101,7 +103,7 @@ config:
 ## How it works
 
 - **Host half** (`src/index.ts`): `UsageService extends TypertRemoteService` exposes `usage/list` via `@Remote('list')` (SRC mode, no codegen). Config is declared with schemastery, and `installSettingsSection` enables hot updates from settings.
-- **Client half** (`src/client/`): a `window.__ModuleLoader__.load({id, factory})` bundle (built by tsdown) registers into the `sidebar.footer.action` slot and polls `usage/list` through `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` on its own interval. The service stays stateless — every poll fetches live values.
+- **Client half** (`src/client/`): a `window.__ModuleLoader__.load({id, factory})` bundle (built by tsdown) mounts through the `sidebar.footer.action` slot (used purely as a mount point — the trigger itself is a floating ball portaled to `document.body`) and polls `usage/list` through `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` on its own interval. The service stays stateless — every poll fetches live values.
 
 ## License
 

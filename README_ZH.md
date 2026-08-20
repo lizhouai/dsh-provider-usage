@@ -10,7 +10,7 @@
 
 # dsh-provider-usage
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件：在 Web GUI 上悬浮一个可任意拖动的额度球，实时查看所有已配置 LLM provider 的账户额度——不用再逐个登录 provider 控制台确认余额。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件：在 Web GUI 上悬浮一个可任意拖动的用量球，实时查看所有已配置 LLM provider 的账户余额与配额用量——不用再逐个登录 provider 控制台确认。
 
 ## 功能
 
@@ -20,7 +20,7 @@
   - **Kimi Code 订阅**（`kimi-coding`）→ `GET {baseURL}/v1/usages`（每周配额及各限速窗口，含重置倒计时）
   - **Moonshot 开放平台**（`moonshotai-cn` / `moonshotai`）→ `GET {baseURL}/users/me/balance`
 - **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。
-- **悬浮球入口** —— 可任意拖动的悬浮球点击弹出额度面板，面板头部的归位按钮可一键回到默认位置；球体光晕表达健康度：绿色全部正常、黄色有配额剩余不足 30%、红色查询失败/缺密钥/用量 ≥90%。
+- **悬浮球入口** —— 可任意拖动的悬浮球点击弹出用量面板，位置持久化；默认停靠在主对话区域左下角（左边距 = 底边距），面板头部的归位按钮一键回到默认位置；球体光晕表达健康度：绿色全部正常、黄色有配额剩余不足 30%、红色查询失败/缺密钥/用量 ≥90%。
 - **版本徽章** —— 面板标题旁显示当前运行的插件版本，一眼确认加载的是哪个发布版。
 - **中英双语** —— 面板内置中英文界面，默认跟随 harness 系统语言，标题栏按钮一键切换（localStorage 持久化）。
 - **刷新周期可调** —— 面板内调整（15s–30min，localStorage 持久化），默认值由插件配置提供。
@@ -28,7 +28,9 @@
 
 ## 截图
 
-![额度面板（中文）](docs/panel-zh.png)
+悬浮球（左下角，绿色光晕表示全部正常）与打开的用量面板：
+
+![用量面板（中文）](docs/panel-zh.png)
 
 ## 安装
 
@@ -62,7 +64,7 @@ dsh plugin --profile web add ./dsh-provider-usage-<version>.tgz
 dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
-然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-usage@0.1.5`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
+然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-usage@0.3.1`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
 
 ## 配置说明
 
@@ -101,7 +103,7 @@ config:
 ## 架构
 
 - **Host 半**（`src/index.ts`）：`UsageService extends TypertRemoteService`，`@Remote('list')` 暴露 `usage/list`（SRC 模式，无需代码生成）；`Config` 用 schemastery 声明，`installSettingsSection` 支持 settings 热更新。
-- **Client 半**（`src/client/`）：`window.__ModuleLoader__.load({id, factory})` 格式 bundle（tsdown 构建），注册到 `sidebar.footer.action` slot，通过 `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` 轮询。服务本身无状态——每次轮询都取实时值。
+- **Client 半**（`src/client/`）：`window.__ModuleLoader__.load({id, factory})` 格式 bundle（tsdown 构建），通过 `sidebar.footer.action` slot 挂载（仅作为挂载点——触发器本体是 portal 到 `document.body` 的悬浮球），通过 `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` 轮询。服务本身无状态——每次轮询都取实时值。
 
 ## 许可证
 
