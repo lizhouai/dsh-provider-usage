@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-provider-usage"><img src="https://img.shields.io/npm/v/dsh-provider-usage.svg?cacheSeconds=300" alt="npm version"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-provider-usage.svg?cacheSeconds=300" alt="MIT license"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness plugin">
 </p>
 
