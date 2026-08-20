@@ -197,6 +197,21 @@ function barTone(percent: number | null): 'ok' | 'warn' | 'danger' {
   return 'ok'
 }
 
+/** Worst health across the fetch + every provider: drives the trigger's status dot. */
+function healthTone(data: QuotaListResult | null, error: string | null): 'ok' | 'warn' | 'danger' {
+  if (error !== null) return 'danger'
+  let tone: 'ok' | 'warn' | 'danger' = 'ok'
+  for (const provider of data?.providers ?? []) {
+    if (provider.status === 'error' || provider.status === 'missing-credential') return 'danger'
+    for (const row of provider.usages ?? []) {
+      const rowTone = barTone(row.percent)
+      if (rowTone === 'danger') return 'danger'
+      if (rowTone === 'warn') tone = 'warn'
+    }
+  }
+  return tone
+}
+
 function formatAmount(value: number | null): string {
   if (value === null) return '—'
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
@@ -473,7 +488,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
     return () => window.removeEventListener('resize', clampTop)
   }, [mode])
 
-  const hasFailure = error !== null || (data?.providers.some((p) => p.status === 'error' || p.status === 'missing-credential') ?? false)
+  const tone = healthTone(data, error)
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== 'Escape' || !open) return
@@ -549,7 +564,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
           className={wide ? 'dsh-quota-trigger' : 'dsh-quota-trigger dsh-quota-trigger--icon'}
           aria-expanded={open && anchor === 'sidebar'}
           aria-label={tt('action.aria')}
-          title={tt('action.aria')}
+          title={`${tt('action.aria')} · ${tt(`status.tone.${tone}`)}`}
           onClick={() => {
             setAnchor('sidebar')
             setNow(Date.now())
@@ -559,7 +574,9 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
         >
           <span className="dsh-quota-triggerIcon"><CoinIcon /></span>
           {wide ? <span>{tt('action.label')}</span> : null}
-          {hasFailure ? <span className="dsh-quota-errorDot" /> : null}
+          {/* Collapsed rail: always show the health dot (it's the only status
+              surface); expanded: only surface warn/danger to stay quiet. */}
+          {(!wide || tone !== 'ok') ? <span className={`dsh-quota-statusDot dsh-quota-statusDot--${tone}`} /> : null}
         </button>
       ) : null}
       {mode !== 'sidebar'
@@ -577,7 +594,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
             }
             aria-expanded={open && anchor === 'float'}
             aria-label={tt('action.aria')}
-            title={tt('action.aria')}
+            title={`${tt('action.aria')} · ${tt(`status.tone.${tone}`)}`}
             onPointerDown={onBallPointerDown}
             onPointerMove={onBallPointerMove}
             onPointerUp={endBallDrag}
@@ -586,7 +603,8 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
             onKeyDown={onKeyDown}
           >
             <CoinIcon />
-            {hasFailure ? <span className="dsh-quota-errorDot" /> : null}
+            {/* The ball is a standalone surface: health dot always on. */}
+            <span className={`dsh-quota-statusDot dsh-quota-statusDot--${tone}`} />
           </button>,
           document.body,
         )

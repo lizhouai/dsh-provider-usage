@@ -30,12 +30,16 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
   align-items: center;
 }
 .dsh-quota-triggerIcon { flex: none; display: inline-flex; }
-/* Failure badge floats on the trigger corner instead of taking layout space,
-   so it never pushes the icon (collapsed) or label (expanded) off-center. */
-.dsh-quota-errorDot {
+/* Health badge floats on the trigger corner instead of taking layout space,
+   so it never pushes the icon (collapsed) or label (expanded) off-center.
+   Color encodes the worst provider state, mirroring the usage bar tones. */
+.dsh-quota-statusDot {
   position: absolute; top: 3px; right: 3px;
-  width: 6px; height: 6px; border-radius: 50%; background: #d94f4f; flex: none;
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
 }
+.dsh-quota-statusDot--ok { background: #22a06b; }
+.dsh-quota-statusDot--warn { background: #e2b93b; }
+.dsh-quota-statusDot--danger { background: #d94f4f; }
 /* Floating ball trigger: a draggable fixed circle portaled to document.body,
    one layer below the panel (1000) so the popover always covers it. Position
    comes from inline style: docked it pins to a viewport edge, while dragging
@@ -51,7 +55,7 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
 }
 .dsh-quota-ball:hover, .dsh-quota-ball:focus-visible { color: var(--dsw-alias-label-secondary); }
 .dsh-quota-ball svg { width: 18px; height: 18px; }
-.dsh-quota-ball .dsh-quota-errorDot { top: 2px; right: 2px; }
+.dsh-quota-ball .dsh-quota-statusDot { top: 2px; right: 2px; }
 .dsh-quota-panel {
   z-index: 1000; box-sizing: border-box;
   border: 1px solid var(--dsw-alias-border-l2);
