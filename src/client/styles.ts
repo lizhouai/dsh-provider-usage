@@ -17,7 +17,7 @@ const CSS = `
    dragging it follows the cursor. Keeps the shell's lv3 lift shadow; the
    tone halo stacks on top. */
 .dsh-quota-ball {
-  position: fixed; z-index: 999; width: 40px; height: 40px; border-radius: 50%;
+  position: fixed; z-index: 999; width: 32px; height: 32px; border-radius: 50%;
   cursor: pointer; touch-action: none;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--dsw-alias-border-l2);
@@ -26,7 +26,7 @@ const CSS = `
   transition: box-shadow 0.15s;
 }
 .dsh-quota-ball:hover, .dsh-quota-ball:focus-visible { color: var(--dsw-alias-label-secondary); }
-.dsh-quota-ball svg { width: 18px; height: 18px; }
+.dsh-quota-ball svg { width: 15px; height: 15px; }
 .dsh-quota-ball.dsh-quota-tone-ok,
 .dsh-quota-ball.dsh-quota-tone-warn,
 .dsh-quota-ball.dsh-quota-tone-danger {

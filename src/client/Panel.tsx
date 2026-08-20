@@ -66,7 +66,7 @@ const POS_KEY = 'dsh.provider-quota.floatPos'
 const DEFAULT_INTERVAL = 60
 
 /** Floating ball diameter in px; drag math derives from it. */
-const BALL_SIZE = 40
+const BALL_SIZE = 32
 
 type Lang = 'zh' | 'en'
 /** Docked ball position: absolute viewport coordinates of the ball's top-left. */
@@ -126,22 +126,40 @@ function storeInterval(value: number): void {
  * ------------------------------------------------------------------ */
 
 function defaultFloatPos(): FloatPos {
-  // Bottom-right: level with the composer send row, floating just above the
-  // shell's power button (bottom: 24px, 46px tall). A user drag persists
-  // over this default.
-  return { x: window.innerWidth - 24 - BALL_SIZE, y: window.innerHeight - 100 - BALL_SIZE }
+  // Bottom-left of the chat area: just right of the sidebar edge, level with
+  // the composer send row. Recomputed on every reset, so 归位 follows both
+  // the composer (welcome screen vs conversation view) and sidebar collapse.
+  // The sidebar edge comes from the full-height ancestor of the settings slot
+  // (stable data-slot hook; class names are build-hashed).
+  let sidebarRight = 264
+  let node = document.querySelector('[data-slot="sidebar.settings"]')?.parentElement ?? null
+  while (node) {
+    const rect = node.getBoundingClientRect()
+    if (rect.x <= 1 && rect.height >= window.innerHeight * 0.9) {
+      sidebarRight = rect.right
+      break
+    }
+    node = node.parentElement
+  }
+  const send = document
+    .querySelector('button[aria-label="发送消息"], button[aria-label="Send message"], button[aria-label="Send"]')
+    ?.getBoundingClientRect()
+  const y = send && send.width > 0
+    ? Math.round(send.top + send.height / 2 - BALL_SIZE / 2)
+    : window.innerHeight - 100 - BALL_SIZE
+  return { x: Math.round(sidebarRight + 16), y }
 }
 
-function readStoredFloatPos(): FloatPos {
+function readStoredFloatPos(): FloatPos | null {
   try {
     const raw = localStorage.getItem(POS_KEY)
-    if (raw === null) return defaultFloatPos()
+    if (raw === null) return null
     const parsed = JSON.parse(raw) as Partial<FloatPos> | null
-    if (parsed === null || typeof parsed.x !== 'number' || !Number.isFinite(parsed.x)) return defaultFloatPos()
-    if (typeof parsed.y !== 'number' || !Number.isFinite(parsed.y)) return defaultFloatPos()
+    if (parsed === null || typeof parsed.x !== 'number' || !Number.isFinite(parsed.x)) return null
+    if (typeof parsed.y !== 'number' || !Number.isFinite(parsed.y)) return null
     return { x: parsed.x, y: parsed.y }
   } catch {
-    return defaultFloatPos()
+    return null
   }
 }
 
@@ -271,12 +289,14 @@ function ProviderCard({ provider, now, t }: { provider: ProviderQuotaView; now: 
  * Trigger + popover
  * ------------------------------------------------------------------ */
 
-/** Gauge: dial + needle, matching the panel's usage-level semantics. */
-function GaugeIcon() {
+/** Battery level: remaining charge reads as remaining quota. */
+function BatteryIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="m12 14 4-4" />
-      <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+      <rect width="16" height="10" x="2" y="7" rx="2" ry="2" />
+      <path d="M22 11v2" />
+      <path d="M6 11v2" />
+      <path d="M10 11v2" />
     </svg>
   )
 }
@@ -319,7 +339,11 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
   const [intervalSec, setIntervalSec] = useState(() => readStoredInterval() ?? DEFAULT_INTERVAL)
   const [langOverride, setLangOverride] = useState<Lang | null>(() => readStoredLang())
   const [now, setNow] = useState(() => Date.now())
-  const [floatPos, setFloatPos] = useState<FloatPos>(() => readStoredFloatPos())
+  const [floatPos, setFloatPos] = useState<FloatPos>(() => readStoredFloatPos() ?? defaultFloatPos())
+  /** True once the position comes from storage/drag/reset — the default
+      anchors to the composer send button, which mounts after this plugin,
+      so an unpinned ball re-anchors as soon as the composer appears. */
+  const posPinned = useRef(readStoredFloatPos() !== null)
   /** Transient ball position while dragging (cursor-centered); null when docked. */
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
 
@@ -341,6 +365,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
     const next = defaultFloatPos()
     storeFloatPos(next)
     setFloatPos(next)
+    posPinned.current = true
   }
   const [panelPos, setPanelPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -448,6 +473,23 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
     return () => window.removeEventListener('resize', clampPos)
   }, [])
 
+  // First run (no stored position): the default anchors to the composer send
+  // button, which mounts after this plugin — poll briefly until it appears.
+  useEffect(() => {
+    if (posPinned.current) return
+    let tries = 0
+    const timer = setInterval(() => {
+      tries += 1
+      if (posPinned.current || tries > 20) {
+        clearInterval(timer)
+        return
+      }
+      const next = defaultFloatPos()
+      setFloatPos((current) => (current.x === next.x && current.y === next.y ? current : next))
+    }, 400)
+    return () => clearInterval(timer)
+  }, [])
+
   const tone = healthTone(data, error)
 
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -493,6 +535,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
     setFloatPos(next)
     storeFloatPos(next)
     setDragPos(null)
+    posPinned.current = true
     suppressClickRef.current = true
   }
 
@@ -534,7 +577,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
           onClick={onBallClick}
           onKeyDown={onKeyDown}
         >
-          <GaugeIcon />
+          <BatteryIcon />
         </button>,
         document.body,
       )}
