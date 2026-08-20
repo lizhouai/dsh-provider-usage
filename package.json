@@ -1,7 +1,7 @@
 {
   "name": "dsh-provider-quota",
-  "version": "0.2.0",
-  "description": "DeepSeek Harness plugin: live account balance/quota panel for every configured LLM provider (sidebar widget, configurable refresh interval)",
+  "version": "0.3.0",
+  "description": "DeepSeek Harness plugin: live account balance/quota panel for every configured LLM provider (draggable floating-ball widget, configurable refresh interval)",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
