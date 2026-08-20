@@ -49,6 +49,9 @@ interface UsageListResult {
 }
 
 export interface UsageActionProps {
+  /** Sidebar expansion state, owned by the sidebar footer slot. Not read
+      directly — a change re-renders us, which re-anchors the default dock. */
+  wide?: boolean
   /** Namespace translator injected by the locale seat. */
   t: (key: string, params?: Record<string, unknown>) => string
   /** Business face: call the host `usage/list` remote. */
@@ -69,10 +72,11 @@ const DEFAULT_INTERVAL = 60
 const BALL_SIZE = 32
 
 type Lang = 'zh' | 'en'
-/** Docked ball position: absolute viewport coordinates of the ball's top-left. */
+/** Docked ball position: the ball CENTER as fractions of the viewport, so
+    both the default spot and dragged spots follow window resizes. */
 interface FloatPos {
-  x: number
-  y: number
+  fx: number
+  fy: number
 }
 
 /** Panel-level override stored in localStorage; null means follow the harness language. */
@@ -128,11 +132,14 @@ function storeInterval(value: number): void {
 /** Equal margin from the chat area's left edge and the window's bottom edge. */
 const DOCK_MARGIN = 24
 
+/**
+ * Default dock: bottom-left of the main chat area with equal margins on both
+ * axes. Returned as viewport fractions of the ball CENTER, like every other
+ * position. The chat area's left edge is the sidebar's right edge, derived
+ * from the full-height ancestor of the settings slot (stable data-slot hook;
+ * class names are build-hashed), so it adapts to sidebar collapse.
+ */
 function defaultFloatPos(): FloatPos {
-  // Bottom-left of the main chat area with equal margins on both axes. The
-  // chat area's left edge is the sidebar's right edge, derived from the
-  // full-height ancestor of the settings slot (stable data-slot hook; class
-  // names are build-hashed), so it adapts to sidebar collapse.
   let sidebarRight = 264
   let node = document.querySelector('[data-slot="sidebar.settings"]')?.parentElement ?? null
   while (node) {
@@ -143,7 +150,10 @@ function defaultFloatPos(): FloatPos {
     }
     node = node.parentElement
   }
-  return { x: Math.round(sidebarRight + DOCK_MARGIN), y: window.innerHeight - DOCK_MARGIN - BALL_SIZE }
+  return {
+    fx: (sidebarRight + DOCK_MARGIN + BALL_SIZE / 2) / window.innerWidth,
+    fy: (window.innerHeight - DOCK_MARGIN - BALL_SIZE / 2) / window.innerHeight,
+  }
 }
 
 function readStoredFloatPos(): FloatPos | null {
@@ -151,9 +161,9 @@ function readStoredFloatPos(): FloatPos | null {
     const raw = localStorage.getItem(POS_KEY)
     if (raw === null) return null
     const parsed = JSON.parse(raw) as Partial<FloatPos> | null
-    if (parsed === null || typeof parsed.x !== 'number' || !Number.isFinite(parsed.x)) return null
-    if (typeof parsed.y !== 'number' || !Number.isFinite(parsed.y)) return null
-    return { x: parsed.x, y: parsed.y }
+    if (parsed === null || typeof parsed.fx !== 'number' || !Number.isFinite(parsed.fx)) return null
+    if (typeof parsed.fy !== 'number' || !Number.isFinite(parsed.fy)) return null
+    return { fx: Math.min(1, Math.max(0, parsed.fx)), fy: Math.min(1, Math.max(0, parsed.fy)) }
   } catch {
     return null
   }
@@ -164,6 +174,15 @@ function storeFloatPos(pos: FloatPos): void {
     localStorage.setItem(POS_KEY, JSON.stringify(pos))
   } catch {
     /* storage unavailable: keep the in-memory value only */
+  }
+}
+
+/** 归位: forget the pinned spot; the ball follows the default dock again. */
+function clearStoredFloatPos(): void {
+  try {
+    localStorage.removeItem(POS_KEY)
+  } catch {
+    /* storage unavailable */
   }
 }
 
@@ -335,7 +354,10 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
   const [intervalSec, setIntervalSec] = useState(() => readStoredInterval() ?? DEFAULT_INTERVAL)
   const [langOverride, setLangOverride] = useState<Lang | null>(() => readStoredLang())
   const [now, setNow] = useState(() => Date.now())
-  const [floatPos, setFloatPos] = useState<FloatPos>(() => readStoredFloatPos() ?? defaultFloatPos())
+  /** Pinned spot (user-dragged) as viewport fractions; null = follow the default dock. */
+  const [pinnedPos, setPinnedPos] = useState<FloatPos | null>(() => readStoredFloatPos())
+  /** Viewport size drives the fraction → px conversion and the default dock. */
+  const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
   /** Transient ball position while dragging (cursor-centered); null when docked. */
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
 
@@ -352,11 +374,10 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
       return next
     })
   }, [harnessLang])
-  /** Panel-head home button: send the ball back to its default spot. */
+  /** Panel-head home button: unpin the ball so it follows the default dock. */
   const resetFloatPos = () => {
-    const next = defaultFloatPos()
-    storeFloatPos(next)
-    setFloatPos(next)
+    clearStoredFloatPos()
+    setPinnedPos(null)
   }
   const [panelPos, setPanelPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -445,23 +466,14 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
-  }, [open, floatPos])
+  }, [open, pinnedPos, viewport])
 
-  // Keep the docked ball inside the viewport across window resizes.
+  // Track the viewport: fraction-based positions and the default dock follow
+  // window resizes automatically.
   useEffect(() => {
-    const clampPos = () => {
-      setFloatPos((current) => {
-        const x = Math.min(Math.max(8, current.x), window.innerWidth - BALL_SIZE - 8)
-        const y = Math.min(Math.max(8, current.y), window.innerHeight - BALL_SIZE - 8)
-        if (x === current.x && y === current.y) return current
-        const next = { x, y }
-        storeFloatPos(next)
-        return next
-      })
-    }
-    clampPos()
-    window.addEventListener('resize', clampPos)
-    return () => window.removeEventListener('resize', clampPos)
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight })
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   const tone = healthTone(data, error)
@@ -505,8 +517,9 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     const half = BALL_SIZE / 2
     const x = Math.min(Math.max(half, event.clientX), window.innerWidth - half)
     const y = Math.min(Math.max(half, event.clientY), window.innerHeight - half)
-    const next: FloatPos = { x: x - half, y: y - half }
-    setFloatPos(next)
+    // Pin the drop point as viewport fractions so it follows window resizes.
+    const next: FloatPos = { fx: x / window.innerWidth, fy: y / window.innerHeight }
+    setPinnedPos(next)
     storeFloatPos(next)
     setDragPos(null)
     suppressClickRef.current = true
@@ -528,6 +541,12 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     if (!open) refresh()
   }
 
+  // Ball center in px: transient drag point > pinned fractions > default dock.
+  // (The default reads the sidebar edge from the DOM at render time; cheap.)
+  const docked = pinnedPos ?? defaultFloatPos()
+  const centerX = dragPos !== null ? dragPos.x : docked.fx * viewport.w
+  const centerY = dragPos !== null ? dragPos.y : docked.fy * viewport.h
+
   return (
     <div ref={rootRef} className="dsh-usage-root" onKeyDown={onKeyDown}>
       {createPortal(
@@ -535,11 +554,7 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
           ref={ballRef}
           type="button"
           className={`dsh-usage-ball dsh-usage-tone-${tone}`}
-          style={
-            dragPos !== null
-              ? { left: dragPos.x - BALL_SIZE / 2, top: dragPos.y - BALL_SIZE / 2 }
-              : { left: floatPos.x, top: floatPos.y }
-          }
+          style={{ left: centerX - BALL_SIZE / 2, top: centerY - BALL_SIZE / 2 }}
           aria-expanded={open}
           aria-label={tt('action.aria')}
           title={`${tt('action.aria')} · ${tt(`status.tone.${tone}`)}`}
