@@ -150,7 +150,10 @@ function storeMode(mode: Mode): void {
 }
 
 function defaultFloatPos(): FloatPos {
-  return { side: 'right', top: Math.round(window.innerHeight * 0.6) }
+  // Dock at the left edge by default: the ball rides next to the sidebar
+  // rail, which reads as a natural extension of the sidebar button it
+  // replaces. A user drag persists over this default.
+  return { side: 'left', top: Math.round(window.innerHeight * 0.6) }
 }
 
 function readStoredFloatPos(): FloatPos {
@@ -305,15 +308,24 @@ function GlobeIcon() {
   )
 }
 
-function MoveIcon() {
+/** Mode toggle icon reflects the CURRENT surface: sidebar strip, ball, or both. */
+function ModeIcon({ mode }: { mode: Mode }) {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 9l-3 3 3 3" />
-      <path d="M9 5l3-3 3 3" />
-      <path d="M15 19l-3 3-3-3" />
-      <path d="M19 9l3 3-3 3" />
-      <path d="M2 12h20" />
-      <path d="M12 2v20" />
+      {mode === 'float' ? (
+        <circle cx="12" cy="12" r="8" />
+      ) : mode === 'both' ? (
+        <>
+          <rect x="2.5" y="5" width="13" height="14" rx="2" />
+          <path d="M7.5 5v14" />
+          <circle cx="17.5" cy="16" r="4" />
+        </>
+      ) : (
+        <>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M10 5v14" />
+        </>
+      )}
     </svg>
   )
 }
@@ -599,7 +611,7 @@ export default function QuotaAction({ wide, t, fetchQuota }: QuotaActionProps) {
               title={`${tt('panel.mode')}: ${tt(`mode.${mode}`)}`}
               aria-label={`${tt('panel.mode')}: ${tt(`mode.${mode}`)}`}
             >
-              <MoveIcon />
+              <ModeIcon mode={mode} />
             </button>
             <button
               type="button"
