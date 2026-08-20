@@ -13,28 +13,25 @@ const CSS = `
 }
 .dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible {
   color: var(--dsw-alias-label-secondary);
+  background-color: var(--dsw-alias-fill-l2);
 }
-/* Tri-tone health glow: the trigger background itself carries the worst
-   provider state — green ok / amber remaining<30% / red error or usage>=90%.
-   A top-lit gradient plus a soft halo echoes the shell's floating power
-   button (lifted surface + drop shadow). color-mix keeps it readable on
-   both light and dark skins. */
+/* Tri-tone health halo: only the shadow carries the worst provider state
+   (green ok / amber remaining<30% / red error or usage>=90%) — the button
+   face itself stays neutral. A 1px tone ring plus a soft halo keeps the
+   state readable on both light and dark skins. */
 .dsh-quota-tone-ok { --dsh-quota-tone: #22a06b; }
 .dsh-quota-tone-warn { --dsh-quota-tone: #e2b93b; }
 .dsh-quota-tone-danger { --dsh-quota-tone: #d94f4f; }
 .dsh-quota-trigger, .dsh-quota-ball {
-  background-image: linear-gradient(180deg,
-    color-mix(in srgb, var(--dsh-quota-tone) 8%, transparent),
-    color-mix(in srgb, var(--dsh-quota-tone) 22%, transparent));
   box-shadow:
-    0 1px 2px color-mix(in srgb, var(--dsh-quota-tone) 22%, transparent),
-    0 4px 14px color-mix(in srgb, var(--dsh-quota-tone) 26%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--dsh-quota-tone) 35%, transparent),
+    0 2px 10px color-mix(in srgb, var(--dsh-quota-tone) 45%, transparent);
 }
 .dsh-quota-trigger:hover, .dsh-quota-trigger:focus-visible,
 .dsh-quota-ball:hover, .dsh-quota-ball:focus-visible {
-  background-image: linear-gradient(180deg,
-    color-mix(in srgb, var(--dsh-quota-tone) 14%, transparent),
-    color-mix(in srgb, var(--dsh-quota-tone) 30%, transparent));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--dsh-quota-tone) 50%, transparent),
+    0 2px 14px color-mix(in srgb, var(--dsh-quota-tone) 60%, transparent);
 }
 /* Collapsed sidebar: a centered square icon button with the same footprint
    as the neighboring rail actions (36×36, 16px icon), so it stays aligned
@@ -73,7 +70,8 @@ div:has(> [data-slot="sidebar.footer.action"] > [data-rail="rail"]) {
 .dsh-quota-ball.dsh-quota-tone-danger {
   box-shadow:
     var(--dsw-shadow-lv3),
-    0 0 14px color-mix(in srgb, var(--dsh-quota-tone) 45%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--dsh-quota-tone) 40%, transparent),
+    0 0 14px color-mix(in srgb, var(--dsh-quota-tone) 55%, transparent);
 }
 .dsh-quota-panel {
   z-index: 1000; box-sizing: border-box;
