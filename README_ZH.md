@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-provider-quota"><img src="https://img.shields.io/npm/v/dsh-provider-quota.svg?cacheSeconds=300" alt="npm version"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-provider-quota.svg?cacheSeconds=300" alt="MIT license"></a>
+  <a href="https://www.npmjs.com/package/dsh-provider-usage"><img src="https://img.shields.io/npm/v/dsh-provider-usage.svg?cacheSeconds=300" alt="npm version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-provider-usage.svg?cacheSeconds=300" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness plugin">
 </p>
 
-# dsh-provider-quota
+# dsh-provider-usage
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件：在 Web GUI 上悬浮一个可任意拖动的额度球，实时查看所有已配置 LLM provider 的账户额度——不用再逐个登录 provider 控制台确认余额。
 
@@ -38,31 +38,31 @@
 ### npm
 
 ```sh
-dsh plugin --profile web add dsh-provider-quota@latest
+dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
 ### 从源码构建
 
 ```sh
-git clone https://github.com/lizhouai/dsh-provider-quota.git
-cd dsh-provider-quota
+git clone https://github.com/lizhouai/dsh-provider-usage.git
+cd dsh-provider-usage
 pnpm install
 pnpm build
-pnpm pack   # 产出 dsh-provider-quota-<version>.tgz
-dsh plugin --profile web add ./dsh-provider-quota-<version>.tgz
+pnpm pack   # 产出 dsh-provider-usage-<version>.tgz
+dsh plugin --profile web add ./dsh-provider-usage-<version>.tgz
 ```
 
-注意要安装 **tarball** 而不是仓库目录：`dsh plugin add .` 会链接整个仓库，仓库自带 `node_modules` 里的 `@deepseek-ai/cordis` 会遮蔽 harness 的共享实例，导致 host 半注册不上（RPC 404）。link 方式仍适合纯 UI 迭代（浏览器 bundle 自包含，重新 build + 刷新页面即生效），但需要 host 半时请切换到 tarball 或 npm 正式版。若替换 link 安装时 pnpm 报 `EPERM ... symlink`，手动删除 profile 目录下残留的 `node_modules/dsh-provider-quota` 联结后重试即可。
+注意要安装 **tarball** 而不是仓库目录：`dsh plugin add .` 会链接整个仓库，仓库自带 `node_modules` 里的 `@deepseek-ai/cordis` 会遮蔽 harness 的共享实例，导致 host 半注册不上（RPC 404）。link 方式仍适合纯 UI 迭代（浏览器 bundle 自包含，重新 build + 刷新页面即生效），但需要 host 半时请切换到 tarball 或 npm 正式版。若替换 link 安装时 pnpm 报 `EPERM ... symlink`，手动删除 profile 目录下残留的 `node_modules/dsh-provider-usage` 联结后重试即可。
 
 插件集合变化后需重启 `dsh web`；之后仅改动代码时重新 build + 重新 add + 刷新页面即可。
 
 ## 升级
 
 ```sh
-dsh plugin --profile web add dsh-provider-quota@latest
+dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
-然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-quota@0.1.5`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
+然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-usage@0.1.5`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
 
 ## 配置说明
 
@@ -70,8 +70,8 @@ dsh plugin --profile web add dsh-provider-quota@latest
 
 ```yaml
 - insert:
-    - id: provider-quota
-      name: dsh-provider-quota
+    - id: provider-usage
+      name: dsh-provider-usage
       config:
         refreshSeconds: 60   # 面板默认刷新周期（秒）
         autoDetect: true     # 自动枚举 llm 注册表中的 provider
@@ -84,7 +84,7 @@ dsh plugin --profile web add dsh-provider-quota@latest
 | `autoDetect` | boolean | `true` | 从 llm 注册表自动枚举 provider |
 | `providers` | array | `[]` | 手动 provider 规格：`{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`，`kind ∈ deepseek / kimi-coding / moonshot` |
 
-也可以在 `~/.dsh/settings.yaml` 中通过 `provider-quota:` 命名空间热更新同样字段。
+也可以在 `~/.dsh/settings.yaml` 中通过 `provider-usage:` 命名空间热更新同样字段。
 
 ### 手动添加一个 provider 示例
 
@@ -100,8 +100,8 @@ config:
 
 ## 架构
 
-- **Host 半**（`src/index.ts`）：`QuotaService extends TypertRemoteService`，`@Remote('list')` 暴露 `quota/list`（SRC 模式，无需代码生成）；`Config` 用 schemastery 声明，`installSettingsSection` 支持 settings 热更新。
-- **Client 半**（`src/client/`）：`window.__ModuleLoader__.load({id, factory})` 格式 bundle（tsdown 构建），注册到 `sidebar.footer.action` slot，通过 `ctx.connection.rpc.call('/api', 'quota/list', {args:{}})` 轮询。服务本身无状态——每次轮询都取实时值。
+- **Host 半**（`src/index.ts`）：`UsageService extends TypertRemoteService`，`@Remote('list')` 暴露 `usage/list`（SRC 模式，无需代码生成）；`Config` 用 schemastery 声明，`installSettingsSection` 支持 settings 热更新。
+- **Client 半**（`src/client/`）：`window.__ModuleLoader__.load({id, factory})` 格式 bundle（tsdown 构建），注册到 `sidebar.footer.action` slot，通过 `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` 轮询。服务本身无状态——每次轮询都取实时值。
 
 ## 许可证
 

@@ -39,9 +39,9 @@ export const zh = {
 
 /** English dictionary, key-identical to the Chinese source of truth. */
 export const en = {
-  'action.label': 'Quota',
-  'action.aria': 'Provider quota',
-  'panel.title': 'Provider Quota',
+  'action.label': 'Usage',
+  'action.aria': 'Provider usage',
+  'panel.title': 'Provider Usage',
   'panel.refresh': 'Refresh now',
   'panel.refreshing': 'Refreshing…',
   'lang.switch': '切换到中文',
@@ -65,7 +65,7 @@ export const en = {
   'usage.unlimited': 'Unlimited',
   'usage.resetAt': 'Resets at {time}',
   'usage.resetIn': 'Resets in {countdown}',
-  'status.unsupported': 'Quota query is not supported for this provider',
+  'status.unsupported': 'Usage query is not supported for this provider',
   'status.missingCredential': 'No API key configured ({ref})',
   'status.error': 'Query failed',
   'status.tone.ok': 'All providers healthy',

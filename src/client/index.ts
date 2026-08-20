@@ -1,12 +1,12 @@
 /**
- * provider-quota — browser half.
+ * provider-usage — browser half.
  *
- * Registers the locale dictionaries and contributes the quota widget into the
- * sidebar footer's additive action slot. Data comes from the host `quota`
+ * Registers the locale dictionaries and contributes the usage widget into the
+ * sidebar footer's additive action slot. Data comes from the host `usage`
  * Typert Remote (SRC mode — no generated descriptors) through the raw RPC
  * caller on the connection service.
  */
-import QuotaAction, { type QuotaActionProps } from './Panel'
+import UsageAction, { type UsageActionProps } from './Panel'
 import { en, zh } from './locales'
 import { ensureStyles } from './styles'
 
@@ -34,24 +34,24 @@ interface ClientContext {
 
 function apply(ctx: ClientContext) {
   ensureStyles()
-  ctx.effect(() => ctx.locale.register('provider-quota', { zh, en }), 'provider-quota: dictionaries')
+  ctx.effect(() => ctx.locale.register('provider-usage', { zh, en }), 'provider-usage: dictionaries')
 
-  const fetchQuota: QuotaActionProps['fetchQuota'] = async () => {
-    const result = await ctx.connection.rpc.call('/api', 'quota/list', { args: {} })
+  const fetchUsage: UsageActionProps['fetchUsage'] = async () => {
+    const result = await ctx.connection.rpc.call('/api', 'usage/list', { args: {} })
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-    return result.value as Awaited<ReturnType<QuotaActionProps['fetchQuota']>>
+    return result.value as Awaited<ReturnType<UsageActionProps['fetchUsage']>>
   }
 
   ctx.slots.inject('sidebar.footer.action', () =>
     ctx.slots.register(
       {
         name: 'sidebar.footer.action',
-        id: 'provider-quota',
+        id: 'provider-usage',
         order: 10,
-        locale: 'provider-quota',
-        inject: () => ({ fetchQuota }),
+        locale: 'provider-usage',
+        inject: () => ({ fetchUsage }),
       },
-      QuotaAction,
+      UsageAction,
     ),
   )
 }

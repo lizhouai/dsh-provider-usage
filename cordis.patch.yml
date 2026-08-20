@@ -1,15 +1,15 @@
-# dsh-provider-quota bundle patch: mounts the provider-quota plugin into the
-# host composition of a dsh profile. The plugin registers a `quota/list` remote
-# service on the host and a quota panel into the Web GUI sidebar footer, so
+# dsh-provider-usage bundle patch: mounts the provider-usage plugin into the
+# host composition of a dsh profile. The plugin registers a `usage/list` remote
+# service on the host and a usage panel into the Web GUI sidebar footer, so
 # every session of the profile can see live provider balances at a glance.
 #
 # Install: `dsh plugin --profile <name> add <this package>` (npm or a local
 # path). The `dsh plugin` command pnpm-installs the package into the profile
 # and reconciles it into the profile's `dsh.profile.bundles` layer list.
 - insert:
-    - id: provider-quota
+    - id: provider-usage
       # Node-resolvable package name — must stay in sync with package.json `name`.
-      name: dsh-provider-quota
+      name: dsh-provider-usage
       # All config fields are optional; defaults are shown below.
       # config:
       #   refreshSeconds: 60   # suggested panel refresh interval (5–86400)

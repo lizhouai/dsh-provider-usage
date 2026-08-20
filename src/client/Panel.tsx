@@ -30,7 +30,7 @@ interface UsageRow {
   resetAt: string | null
 }
 
-interface ProviderQuotaView {
+interface ProviderUsageView {
   id: string
   displayName: string
   kind: 'balance' | 'usage' | null
@@ -40,19 +40,19 @@ interface ProviderQuotaView {
   usages: UsageRow[] | null
 }
 
-interface QuotaListResult {
+interface UsageListResult {
   fetchedAt: string
   refreshSeconds: number
   /** Plugin package version (absent on older hosts). */
   version?: string
-  providers: ProviderQuotaView[]
+  providers: ProviderUsageView[]
 }
 
-export interface QuotaActionProps {
+export interface UsageActionProps {
   /** Namespace translator injected by the locale seat. */
   t: (key: string, params?: Record<string, unknown>) => string
-  /** Business face: call the host `quota/list` remote. */
-  fetchQuota: () => Promise<QuotaListResult>
+  /** Business face: call the host `usage/list` remote. */
+  fetchUsage: () => Promise<UsageListResult>
 }
 
 /* ------------------------------------------------------------------ *
@@ -60,9 +60,9 @@ export interface QuotaActionProps {
  * ------------------------------------------------------------------ */
 
 const INTERVAL_OPTIONS = [15, 30, 60, 300, 900, 1800] as const
-const STORAGE_KEY = 'dsh.provider-quota.refreshSeconds'
-const LANG_KEY = 'dsh.provider-quota.lang'
-const POS_KEY = 'dsh.provider-quota.floatPos'
+const STORAGE_KEY = 'dsh.provider-usage.refreshSeconds'
+const LANG_KEY = 'dsh.provider-usage.lang'
+const POS_KEY = 'dsh.provider-usage.floatPos'
 const DEFAULT_INTERVAL = 60
 
 /** Floating ball diameter in px; drag math derives from it. */
@@ -94,7 +94,7 @@ function storeLang(lang: Lang): void {
 }
 
 /** Local translator over the bundled dictionaries, mirroring the shell's `{param}` interpolation. */
-function makeT(dict: Record<string, string>): QuotaActionProps['t'] {
+function makeT(dict: Record<string, string>): UsageActionProps['t'] {
   return (key, params) => {
     const template = dict[key] ?? key
     if (params === undefined) return template
@@ -175,7 +175,7 @@ function storeFloatPos(pos: FloatPos): void {
  * Formatting helpers
  * ------------------------------------------------------------------ */
 
-function formatCountdown(resetAt: string, now: number, t: QuotaActionProps['t']): string | null {
+function formatCountdown(resetAt: string, now: number, t: UsageActionProps['t']): string | null {
   const diff = new Date(resetAt).getTime() - now
   if (!Number.isFinite(diff) || diff <= 0) return null
   const minutes = Math.floor(diff / 60000)
@@ -192,7 +192,7 @@ function barTone(percent: number | null): 'ok' | 'warn' | 'danger' {
 }
 
 /** Worst health across the fetch + every provider: drives the trigger's status dot. */
-function healthTone(data: QuotaListResult | null, error: string | null): 'ok' | 'warn' | 'danger' {
+function healthTone(data: UsageListResult | null, error: string | null): 'ok' | 'warn' | 'danger' {
   if (error !== null) return 'danger'
   let tone: 'ok' | 'warn' | 'danger' = 'ok'
   for (const provider of data?.providers ?? []) {
@@ -215,7 +215,7 @@ function formatAmount(value: number | null): string {
  * Provider card
  * ------------------------------------------------------------------ */
 
-function UsageRows({ provider, now, t }: { provider: ProviderQuotaView; now: number; t: QuotaActionProps['t'] }) {
+function UsageRows({ provider, now, t }: { provider: ProviderUsageView; now: number; t: UsageActionProps['t'] }) {
   const rows = provider.usages ?? []
   if (rows.length === 0) return null
   return (
@@ -224,10 +224,10 @@ function UsageRows({ provider, now, t }: { provider: ProviderQuotaView; now: num
         const percent = row.percent
         const reset = row.resetAt !== null ? formatCountdown(row.resetAt, now, t) : null
         return (
-          <div className="dsh-quota-usageRow" key={`${row.label}-${index}`}>
-            <div className="dsh-quota-usageHead">
-              <span className="dsh-quota-usageLabel">{row.label === 'weekly' ? t('usage.weekly') : row.label}</span>
-              <span className="dsh-quota-usageValue">
+          <div className="dsh-usage-row" key={`${row.label}-${index}`}>
+            <div className="dsh-usage-rowHead">
+              <span className="dsh-usage-rowLabel">{row.label === 'weekly' ? t('usage.weekly') : row.label}</span>
+              <span className="dsh-usage-rowValue">
                 {row.limit === null
                   ? t('usage.unlimited')
                   : percent !== null
@@ -236,14 +236,14 @@ function UsageRows({ provider, now, t }: { provider: ProviderQuotaView; now: num
               </span>
             </div>
             {percent !== null ? (
-              <div className="dsh-quota-barTrack">
+              <div className="dsh-usage-barTrack">
                 <div
-                  className={`dsh-quota-barFill dsh-quota-barFill--${barTone(percent)}`}
+                  className={`dsh-usage-barFill dsh-usage-barFill--${barTone(percent)}`}
                   style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
                 />
               </div>
             ) : null}
-            {reset !== null ? <span className="dsh-quota-usageReset">{t('usage.resetIn', { countdown: reset })}</span> : null}
+            {reset !== null ? <span className="dsh-usage-rowReset">{t('usage.resetIn', { countdown: reset })}</span> : null}
           </div>
         )
       })}
@@ -251,26 +251,26 @@ function UsageRows({ provider, now, t }: { provider: ProviderQuotaView; now: num
   )
 }
 
-function ProviderCard({ provider, now, t }: { provider: ProviderQuotaView; now: number; t: QuotaActionProps['t'] }) {
+function ProviderCard({ provider, now, t }: { provider: ProviderUsageView; now: number; t: UsageActionProps['t'] }) {
   return (
-    <div className="dsh-quota-card">
-      <div className="dsh-quota-cardHead">
-        <span className="dsh-quota-providerName">{provider.displayName}</span>
+    <div className="dsh-usage-card">
+      <div className="dsh-usage-cardHead">
+        <span className="dsh-usage-providerName">{provider.displayName}</span>
       </div>
       {provider.status === 'unsupported' ? (
-        <span className="dsh-quota-message">{t('status.unsupported')}</span>
+        <span className="dsh-usage-message">{t('status.unsupported')}</span>
       ) : provider.status === 'missing-credential' ? (
-        <span className="dsh-quota-message">{t('status.missingCredential', { ref: provider.message })}</span>
+        <span className="dsh-usage-message">{t('status.missingCredential', { ref: provider.message })}</span>
       ) : provider.status === 'error' ? (
-        <span className="dsh-quota-message">{t('status.error')}: {provider.message}</span>
+        <span className="dsh-usage-message">{t('status.error')}: {provider.message}</span>
       ) : provider.kind === 'balance' ? (
         (provider.balances ?? []).map((row, index) => (
           <div key={`${row.currency}-${index}`}>
-            <div className="dsh-quota-balanceRow">
-              <span className="dsh-quota-balanceTotal">{row.total}</span>
-              <span className="dsh-quota-balanceCurrency">{row.currency}</span>
+            <div className="dsh-usage-balanceRow">
+              <span className="dsh-usage-balanceTotal">{row.total}</span>
+              <span className="dsh-usage-balanceCurrency">{row.currency}</span>
             </div>
-            <span className="dsh-quota-balanceParts">
+            <span className="dsh-usage-balanceParts">
               {[row.granted !== '0' && row.granted !== '0.00' ? t('balance.granted', { amount: row.granted }) : null,
                 row.toppedUp !== '0' && row.toppedUp !== '0.00' ? t('balance.toppedUp', { amount: row.toppedUp }) : null]
                 .filter(Boolean)
@@ -331,9 +331,9 @@ function HomeIcon() {
   )
 }
 
-export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
+export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
   const [open, setOpen] = useState(false)
-  const [data, setData] = useState<QuotaListResult | null>(null)
+  const [data, setData] = useState<UsageListResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [intervalSec, setIntervalSec] = useState(() => readStoredInterval() ?? DEFAULT_INTERVAL)
@@ -382,7 +382,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
     inFlight.current = true
     setLoading(true)
     try {
-      const result = await fetchQuota()
+      const result = await fetchUsage()
       setData(result)
       setError(null)
     } catch (reason) {
@@ -391,7 +391,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
       inFlight.current = false
       setLoading(false)
     }
-  }, [fetchQuota])
+  }, [fetchUsage])
 
   // Initial fetch + fixed-interval polling; skip ticks while the tab is hidden.
   useEffect(() => {
@@ -556,12 +556,12 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
   }
 
   return (
-    <div ref={rootRef} className="dsh-quota-root" onKeyDown={onKeyDown}>
+    <div ref={rootRef} className="dsh-usage-root" onKeyDown={onKeyDown}>
       {createPortal(
         <button
           ref={ballRef}
           type="button"
-          className={`dsh-quota-ball dsh-quota-tone-${tone}`}
+          className={`dsh-usage-ball dsh-usage-tone-${tone}`}
           style={
             dragPos !== null
               ? { left: dragPos.x - BALL_SIZE / 2, top: dragPos.y - BALL_SIZE / 2 }
@@ -585,18 +585,18 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
         ? createPortal(
           <div
             ref={panelRef}
-            className="dsh-quota-panel"
+            className="dsh-usage-panel"
             role="dialog"
             aria-label={tt('panel.title')}
             style={{ left: panelPos.left, top: panelPos.top, bottom: panelPos.bottom }}
             onKeyDown={onKeyDown}
           >
-          <div className="dsh-quota-head">
-            <span className="dsh-quota-title">{tt('panel.title')}</span>
-            {data?.version ? <span className="dsh-quota-version">v{data.version}</span> : null}
+          <div className="dsh-usage-head">
+            <span className="dsh-usage-title">{tt('panel.title')}</span>
+            {data?.version ? <span className="dsh-usage-version">v{data.version}</span> : null}
             <button
               type="button"
-              className="dsh-quota-home"
+              className="dsh-usage-home"
               onClick={resetFloatPos}
               title={tt('panel.resetPos')}
               aria-label={tt('panel.resetPos')}
@@ -605,7 +605,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
             </button>
             <button
               type="button"
-              className="dsh-quota-lang"
+              className="dsh-usage-lang"
               onClick={toggleLang}
               title={tt('lang.switch')}
               aria-label={tt('lang.switch')}
@@ -615,7 +615,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
             </button>
             <button
               type="button"
-              className={`dsh-quota-refresh${loading ? ' dsh-quota-refresh--loading' : ''}`}
+              className={`dsh-usage-refresh${loading ? ' dsh-usage-refresh--loading' : ''}`}
               disabled={loading}
               onClick={refresh}
               title={tt('panel.refresh')}
@@ -625,18 +625,18 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
             </button>
           </div>
           {data === null && error !== null ? (
-            <span className="dsh-quota-message">{tt('status.error')}: {error}</span>
+            <span className="dsh-usage-message">{tt('status.error')}: {error}</span>
           ) : null}
           {data !== null && data.providers.length === 0 ? (
-            <span className="dsh-quota-message">{tt('panel.empty')}</span>
+            <span className="dsh-usage-message">{tt('panel.empty')}</span>
           ) : null}
           {(data?.providers ?? []).map((provider) => (
             <ProviderCard key={provider.id} provider={provider} now={now} t={tt} />
           ))}
-          <div className="dsh-quota-foot">
-            <span className="dsh-quota-footLabel">{tt('panel.interval')}</span>
+          <div className="dsh-usage-foot">
+            <span className="dsh-usage-footLabel">{tt('panel.interval')}</span>
             <select
-              className="dsh-quota-select"
+              className="dsh-usage-select"
               value={intervalSec}
               onChange={(event) => {
                 const value = Number(event.target.value)
@@ -648,7 +648,7 @@ export default function QuotaAction({ t, fetchQuota }: QuotaActionProps) {
                 <option key={seconds} value={seconds}>{tt(`interval.${seconds}s`)}</option>
               ))}
             </select>
-            <span className="dsh-quota-updated">
+            <span className="dsh-usage-updated">
               {data === null
                 ? tt('panel.never')
                 : tt('panel.updated', { time: new Date(data.fetchedAt).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US') })}

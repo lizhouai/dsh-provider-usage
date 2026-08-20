@@ -1,7 +1,7 @@
 /**
- * provider-quota — host half.
+ * provider-usage — host half.
  *
- * A `ctx.quota` Typert Remote service that reports the account balance/quota
+ * A `ctx.usage` Typert Remote service that reports the account balance/quota
  * of every configured LLM provider route. Provider routes are auto-detected
  * from the live `llm` registry plus the composed settings sections, keys are
  * resolved per request through the credentials service (never cached), and
@@ -11,9 +11,9 @@
  * - `kimi-coding` → GET {baseURL}/v1/usages             (订阅配额, weekly / 5h windows)
  * - `moonshot`    → GET {baseURL}/users/me/balance      (开放平台余额)
  *
- * The browser widget polls `quota/list` on its own configurable interval, so
+ * The browser widget polls `usage/list` on its own configurable interval, so
  * this service stays stateless: every call fetches live values.
- * @module dsh-provider-quota
+ * @module dsh-provider-usage
  */
 import { createRequire } from 'node:module'
 import type { Context } from '@deepseek-ai/cordis'
@@ -23,12 +23,12 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
-export const name = 'provider-quota'
+export const name = 'provider-usage'
 
 /** Own package version, read from the installed package.json (lib/index.js sits one level below the root). */
 export const version: string = createRequire(import.meta.url)('../package.json').version
 
-const NS = settingsNamespace('provider-quota')
+const NS = settingsNamespace('provider-usage')
 
 /* ------------------------------------------------------------------ *
  * Wire views (mirrored by the client bundle)
@@ -52,7 +52,7 @@ export interface UsageRow {
   resetAt: string | null
 }
 
-export interface ProviderQuotaView {
+export interface ProviderUsageView {
   id: string
   displayName: string
   kind: 'balance' | 'usage' | null
@@ -62,13 +62,13 @@ export interface ProviderQuotaView {
   usages: UsageRow[] | null
 }
 
-export interface QuotaListResult {
+export interface UsageListResult {
   fetchedAt: string
   /** Deployment-suggested refresh interval; the widget may override it locally. */
   refreshSeconds: number
   /** Plugin package version, surfaced in the panel header. */
   version: string
-  providers: ProviderQuotaView[]
+  providers: ProviderUsageView[]
 }
 
 /* ------------------------------------------------------------------ *
@@ -94,7 +94,7 @@ export const Config = z.object({
   providers: z.array(ProviderSpec).default([]),
 })
 
-export interface ProviderQuotaConfig {
+export interface ProviderUsageConfig {
   refreshSeconds: number
   autoDetect: boolean
   providers: Array<{
@@ -253,11 +253,11 @@ async function fetchJson(url: string, apiKey: string, signal: AbortSignal, extra
   return body
 }
 
-function okView(base: Omit<ProviderQuotaView, 'status' | 'message'>): ProviderQuotaView {
+function okView(base: Omit<ProviderUsageView, 'status' | 'message'>): ProviderUsageView {
   return { ...base, status: 'ok', message: null }
 }
 
-function failView(id: string, displayName: string, kind: ProviderQuotaView['kind'], status: ProviderQuotaView['status'], message: string): ProviderQuotaView {
+function failView(id: string, displayName: string, kind: ProviderUsageView['kind'], status: ProviderUsageView['status'], message: string): ProviderUsageView {
   return { id, displayName, kind, status, message, balances: null, usages: null }
 }
 
@@ -265,11 +265,11 @@ function failView(id: string, displayName: string, kind: ProviderQuotaView['kind
  * Service
  * ------------------------------------------------------------------ */
 
-export class QuotaService extends TypertRemoteService {
-  private readonly options: () => ProviderQuotaConfig
+export class UsageService extends TypertRemoteService {
+  private readonly options: () => ProviderUsageConfig
 
-  constructor(ctx: Context, options: () => ProviderQuotaConfig) {
-    super(ctx, 'quota')
+  constructor(ctx: Context, options: () => ProviderUsageConfig) {
+    super(ctx, 'usage')
     this.options = options
   }
 
@@ -277,7 +277,7 @@ export class QuotaService extends TypertRemoteService {
    * Fetch the live quota snapshot of every configured provider.
    * @param signal - optional cancellation signal carried over the RPC carrier.
    */
-  async list(signal?: AbortSignal): Promise<QuotaListResult> {
+  async list(signal?: AbortSignal): Promise<UsageListResult> {
     const specs = await this.collectSpecs()
     const providers = await Promise.all(specs.map((spec) => this.fetchProvider(spec, signal)))
     return {
@@ -360,11 +360,11 @@ export class QuotaService extends TypertRemoteService {
     return undefined
   }
 
-  private async fetchProvider(spec: DetectedProvider, outerSignal?: AbortSignal): Promise<ProviderQuotaView> {
+  private async fetchProvider(spec: DetectedProvider, outerSignal?: AbortSignal): Promise<ProviderUsageView> {
     if ('unsupported' in spec) {
       return failView(spec.route.id, spec.route.name || spec.route.id, null, 'unsupported', spec.route.id)
     }
-    const kind: ProviderQuotaView['kind'] = spec.kind === 'kimi-coding' ? 'usage' : 'balance'
+    const kind: ProviderUsageView['kind'] = spec.kind === 'kimi-coding' ? 'usage' : 'balance'
     const base = { id: spec.id, displayName: spec.displayName, kind, balances: null, usages: null }
     const apiKey = await this.resolveApiKey(spec.apiKeyEnv)
     if (apiKey === undefined) {
@@ -439,16 +439,16 @@ function markRemoteMethod(prototype: object, method: string, exportName: string)
   for (const initializer of initializers) initializer.call(pseudo)
 }
 
-markRemoteMethod(QuotaService.prototype, 'list', 'list')
+markRemoteMethod(UsageService.prototype, 'list', 'list')
 
-export function apply(ctx: Context, config: ProviderQuotaConfig) {
+export function apply(ctx: Context, config: ProviderUsageConfig) {
   let current = () => config
   installSettingsSection(ctx, NS, Config, config, {
     setSource: (source) => {
-      current = source as () => ProviderQuotaConfig
+      current = source as () => ProviderUsageConfig
     },
     onChange: () => {},
   })
-  // Constructing the service registers `ctx.quota` and the `quota/*` wire namespace.
-  new QuotaService(ctx, () => current())
+  // Constructing the service registers `ctx.usage` and the `usage/*` wire namespace.
+  new UsageService(ctx, () => current())
 }

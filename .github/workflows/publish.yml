@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'lizhouai/dsh-provider-quota'
+    if: github.repository == 'lizhouai/dsh-provider-usage'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

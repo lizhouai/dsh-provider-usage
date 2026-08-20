@@ -1,5 +1,5 @@
 /**
- * tsdown config for dsh-provider-quota, adapted from the harness's
+ * tsdown config for dsh-provider-usage, adapted from the harness's
  * shared `packages/client/tsdown.client.ts` preset:
  *
  * - Node half: `src/index.ts` → `lib/index.js` (ESM; @deepseek-ai/* peers

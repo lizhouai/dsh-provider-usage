@@ -1,7 +1,7 @@
 {
-  "name": "dsh-provider-quota",
+  "name": "dsh-provider-usage",
   "version": "0.3.0",
-  "description": "DeepSeek Harness plugin: live account balance/quota panel for every configured LLM provider (draggable floating-ball widget, configurable refresh interval)",
+  "description": "DeepSeek Harness plugin: live account balance/usage panel for every configured LLM provider (draggable floating-ball widget, configurable refresh interval)",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -30,13 +30,13 @@
     "name": "lizhouai",
     "url": "https://github.com/lizhouai"
   },
-  "homepage": "https://github.com/lizhouai/dsh-provider-quota#readme",
+  "homepage": "https://github.com/lizhouai/dsh-provider-usage#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lizhouai/dsh-provider-quota.git"
+    "url": "git+https://github.com/lizhouai/dsh-provider-usage.git"
   },
   "bugs": {
-    "url": "https://github.com/lizhouai/dsh-provider-quota/issues"
+    "url": "https://github.com/lizhouai/dsh-provider-usage/issues"
   },
   "keywords": [
     "dsh",
@@ -44,6 +44,7 @@
     "deepseek-harness",
     "llm",
     "provider",
+    "usage",
     "quota",
     "balance",
     "deepseek",

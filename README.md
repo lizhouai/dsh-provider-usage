@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-provider-quota"><img src="https://img.shields.io/npm/v/dsh-provider-quota.svg?cacheSeconds=300" alt="npm version"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-provider-quota.svg?cacheSeconds=300" alt="MIT license"></a>
+  <a href="https://www.npmjs.com/package/dsh-provider-usage"><img src="https://img.shields.io/npm/v/dsh-provider-usage.svg?cacheSeconds=300" alt="npm version"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-provider-usage.svg?cacheSeconds=300" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness plugin">
 </p>
 
-# dsh-provider-quota
+# dsh-provider-usage
 
 **Every provider's balance, one glance away.** A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that floats a draggable quota ball over the Web GUI — no more logging into each provider console to check whether you are about to run out of credit mid-session.
 
@@ -38,31 +38,31 @@
 ### npm
 
 ```sh
-dsh plugin --profile web add dsh-provider-quota@latest
+dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
 ### Build from source
 
 ```sh
-git clone https://github.com/lizhouai/dsh-provider-quota.git
-cd dsh-provider-quota
+git clone https://github.com/lizhouai/dsh-provider-usage.git
+cd dsh-provider-usage
 pnpm install
 pnpm build
-pnpm pack   # produces dsh-provider-quota-<version>.tgz
-dsh plugin --profile web add ./dsh-provider-quota-<version>.tgz
+pnpm pack   # produces dsh-provider-usage-<version>.tgz
+dsh plugin --profile web add ./dsh-provider-usage-<version>.tgz
 ```
 
-Install the **tarball**, not the repo directory: `dsh plugin add .` links the repo, whose own `node_modules` then shadows the harness's shared `@deepseek-ai/cordis` instance and the host half never registers (RPC 404). The link form is still handy for client-only UI iteration — the browser bundle is self-contained, so a rebuild + page refresh picks it up — but switch to the tarball (or the npm release) whenever you need the host half. If pnpm fails with `EPERM ... symlink` while replacing a linked install, delete the stale `node_modules/dsh-provider-quota` junction in the profile directory and retry.
+Install the **tarball**, not the repo directory: `dsh plugin add .` links the repo, whose own `node_modules` then shadows the harness's shared `@deepseek-ai/cordis` instance and the host half never registers (RPC 404). The link form is still handy for client-only UI iteration — the browser bundle is self-contained, so a rebuild + page refresh picks it up — but switch to the tarball (or the npm release) whenever you need the host half. If pnpm fails with `EPERM ... symlink` while replacing a linked install, delete the stale `node_modules/dsh-provider-usage` junction in the profile directory and retry.
 
 Restart `dsh web` after changing the plugin set (a plugin add/remove requires a restart; afterwards, code changes only need a rebuild + re-add + page refresh).
 
 ## Upgrade
 
 ```sh
-dsh plugin --profile web add dsh-provider-quota@latest
+dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
-Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-quota@0.1.5`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
+Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-usage@0.1.5`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
 
 ## Configuration
 
@@ -70,8 +70,8 @@ Defaults work out of the box: the plugin auto-detects every provider route of th
 
 ```yaml
 - insert:
-    - id: provider-quota
-      name: dsh-provider-quota
+    - id: provider-usage
+      name: dsh-provider-usage
       config:
         refreshSeconds: 60   # suggested panel refresh interval (5–86400)
         autoDetect: true     # enumerate provider routes from the llm registry
@@ -84,7 +84,7 @@ Defaults work out of the box: the plugin auto-detects every provider route of th
 | `autoDetect` | boolean | `true` | Enumerate live provider routes from the llm registry |
 | `providers` | array | `[]` | Manual provider specs: `{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`, `kind ∈ deepseek / kimi-coding / moonshot` |
 
-The same fields can be hot-updated under the `provider-quota:` namespace in `~/.dsh/settings.yaml`.
+The same fields can be hot-updated under the `provider-usage:` namespace in `~/.dsh/settings.yaml`.
 
 ### Adding a manual provider
 
@@ -100,8 +100,8 @@ config:
 
 ## How it works
 
-- **Host half** (`src/index.ts`): `QuotaService extends TypertRemoteService` exposes `quota/list` via `@Remote('list')` (SRC mode, no codegen). Config is declared with schemastery, and `installSettingsSection` enables hot updates from settings.
-- **Client half** (`src/client/`): a `window.__ModuleLoader__.load({id, factory})` bundle (built by tsdown) registers into the `sidebar.footer.action` slot and polls `quota/list` through `ctx.connection.rpc.call('/api', 'quota/list', {args:{}})` on its own interval. The service stays stateless — every poll fetches live values.
+- **Host half** (`src/index.ts`): `UsageService extends TypertRemoteService` exposes `usage/list` via `@Remote('list')` (SRC mode, no codegen). Config is declared with schemastery, and `installSettingsSection` enables hot updates from settings.
+- **Client half** (`src/client/`): a `window.__ModuleLoader__.load({id, factory})` bundle (built by tsdown) registers into the `sidebar.footer.action` slot and polls `usage/list` through `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` on its own interval. The service stays stateless — every poll fetches live values.
 
 ## License
 
