@@ -31,7 +31,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
       - name: Set up package managers
@@ -59,7 +58,10 @@ jobs:
           npm pack --dry-run --ignore-scripts
 
       - name: Publish to npm
-        run: npm publish --ignore-scripts --access public
+        # Trusted publishing (OIDC): no NPM_TOKEN secret needed; npm 11.19
+        # picks up the GitHub OIDC identity automatically. --provenance adds
+        # the build attestation badge on the npm package page.
+        run: npm publish --ignore-scripts --access public --provenance
 
       - name: Create GitHub Release
         if: github.ref_type == 'tag'
