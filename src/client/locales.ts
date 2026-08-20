@@ -1,8 +1,8 @@
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  'action.label': '额度',
-  'action.aria': 'Provider 额度',
-  'panel.title': 'Provider 额度',
+  'action.label': '用量',
+  'action.aria': 'Provider 用量',
+  'panel.title': 'Provider 用量',
   'panel.refresh': '立即刷新',
   'panel.refreshing': '刷新中…',
   'lang.switch': 'Switch to English',
