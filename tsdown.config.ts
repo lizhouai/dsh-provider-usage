@@ -21,6 +21,17 @@ const ID: string = JSON.parse(
 ).name
 
 /**
+ * Own package version, baked into the node bundle at build time. Reading it
+ * at runtime (createRequire on ../package.json) trips Socket.dev's
+ * dynamicRequire + filesystemAccess alerts and assumes package.json always
+ * sits one level above lib/index.js; a compile-time constant has neither
+ * problem. prepublishOnly rebuilds, so the snapshot cannot drift on publish.
+ */
+const VERSION: string = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+).version
+
+/**
  * Externals answered by the shell's loader module table (PLATFORM_MODULES in
  * dsh-client-web plus the documented runtime exemption). Everything else the
  * client imports is inlined into the bundle.
@@ -50,6 +61,9 @@ export default defineConfig([
     dts: false,
     sourcemap: false,
     clean: true,
+    define: {
+      __PLUGIN_VERSION__: JSON.stringify(VERSION),
+    },
   },
   {
     name: `${ID}/client`,

@@ -54,3 +54,6 @@ declare module '@deepseek-ai/dsh-settings' {
     hooks: { setSource?: (source: () => unknown) => void; onChange?: () => void },
   ): void
 }
+
+/** Own package version, injected by tsdown `define` at build time. */
+declare const __PLUGIN_VERSION__: string

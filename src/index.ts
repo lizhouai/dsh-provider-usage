@@ -15,7 +15,6 @@
  * this service stays stateless: every call fetches live values.
  * @module dsh-provider-usage
  */
-import { createRequire } from 'node:module'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -25,8 +24,9 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
 export const name = 'provider-usage'
 
-/** Own package version, read from the installed package.json (lib/index.js sits one level below the root). */
-export const version: string = createRequire(import.meta.url)('../package.json').version
+/** Own package version, baked in by tsdown `define` at build time (the
+    fallback only fires if the sources are compiled some other way). */
+export const version: string = typeof __PLUGIN_VERSION__ === 'undefined' ? '0.0.0-dev' : __PLUGIN_VERSION__
 
 const NS = settingsNamespace('provider-usage')
 
