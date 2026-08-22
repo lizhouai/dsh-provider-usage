@@ -244,7 +244,11 @@ function UsageRows({ provider, now, t }: { provider: ProviderUsageView; now: num
               <span className="dsh-usage-rowLabel">{row.label === 'weekly' ? t('usage.weekly') : row.label}</span>
               <span className="dsh-usage-rowValue">
                 {row.limit === null
-                  ? t('usage.unlimited')
+                  ? row.used !== null
+                    ? t('usage.used', { used: formatAmount(row.used) })
+                    : row.remaining !== null
+                      ? formatAmount(row.remaining)
+                      : t('usage.unlimited')
                   : percent !== null
                     ? `${Math.round(percent)}%`
                     : t('usage.used', { used: formatAmount(row.used) })}
