@@ -7,10 +7,18 @@
  * resolved per request through the credentials service (never cached), and
  * each provider kind has its own wire adapter (see ADAPTERS below):
  *
- * - `deepseek`    → GET {baseURL}/user/balance          (充值余额)
- * - `kimi-coding` → GET {baseURL}/v1/usages             (订阅配额, weekly / 5h windows)
- * - `moonshot`    → GET {baseURL}/users/me/balance      (开放平台余额)
- * - `openrouter`  → GET {origin}/api/v1/credits         (credit 总额与已用量)
+ * - `deepseek`       → GET {baseURL}/user/balance              (充值余额)
+ * - `kimi-coding`    → GET {baseURL}/v1/usages                 (订阅配额, weekly / 5h windows)
+ * - `moonshot`       → GET {baseURL}/users/me/balance          (开放平台余额)
+ * - `openrouter`     → GET {origin}/api/v1/credits             (credit 总额与已用量)
+ * - `github-copilot` → GET api.github.com/copilot_internal/user (订阅配额快照, OAuth token)
+ * - `openai-codex`   → GET {baseURL}/wham/usage                (ChatGPT 订阅 5h/weekly 窗口)
+ * - `openai`         → GET {origin}/v1/organization/costs      (Admin key, 当月花费)
+ * - `anthropic`      → GET {baseURL}/v1/organizations/cost_report (Admin key, 当月花费)
+ * - `minimax`        → GET {origin}/v1/api/openplatform/coding_plan/remains (Coding Plan 5h/weekly)
+ * - `zai`            → GET {origin}/api/monitor/usage/quota/limit (GLM Coding Plan 配额)
+ * - `opencode`       → GET {baseURL}/usage                     (Zen Go 订阅 5h/weekly/monthly)
+ * - `xai`            → GET {baseURL}/prepaid/balance           (Management key, 手动配置)
  *
  * The browser widget polls `usage/list` on its own configurable interval, so
  * this service stays stateless: every call fetches live values.
@@ -76,7 +84,20 @@ export interface UsageListResult {
  * Provider kinds & adapters
  * ------------------------------------------------------------------ */
 
-const PROVIDER_KINDS = ['deepseek', 'kimi-coding', 'moonshot', 'openrouter', 'github-copilot', 'openai-codex', 'openai', 'anthropic'] as const
+const PROVIDER_KINDS = [
+  'deepseek',
+  'kimi-coding',
+  'moonshot',
+  'openrouter',
+  'github-copilot',
+  'openai-codex',
+  'openai',
+  'anthropic',
+  'minimax',
+  'zai',
+  'opencode',
+  'xai',
+] as const
 
 type ProviderKind = (typeof PROVIDER_KINDS)[number]
 
@@ -191,8 +212,8 @@ const KNOWN_ROUTES: Record<string, { baseURL?: string; apiKeyEnv?: string; displ
   'xiaomi-token-plan-ams': { baseURL: 'https://token-plan-ams.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_TOKEN_PLAN_AMS_API_KEY', displayName: 'Xiaomi Token Plan AMS' },
   'xiaomi-token-plan-cn': { baseURL: 'https://token-plan-cn.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_TOKEN_PLAN_CN_API_KEY', displayName: 'Xiaomi Token Plan CN' },
   'xiaomi-token-plan-sgp': { baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_TOKEN_PLAN_SGP_API_KEY', displayName: 'Xiaomi Token Plan SGP' },
-  opencode: { apiKeyEnv: 'OPENCODE_API_KEY', displayName: 'OpenCode Zen' },
-  'opencode-go': { apiKeyEnv: 'OPENCODE_API_KEY', displayName: 'OpenCode Zen Go' },
+  opencode: { baseURL: 'https://opencode.ai/zen/v1', apiKeyEnv: 'OPENCODE_API_KEY', displayName: 'OpenCode Zen' },
+  'opencode-go': { baseURL: 'https://opencode.ai/zen/go/v1', apiKeyEnv: 'OPENCODE_API_KEY', displayName: 'OpenCode Zen Go' },
   'azure-openai-responses': { apiKeyEnv: 'AZURE_OPENAI_API_KEY', displayName: 'Azure OpenAI' },
   'amazon-bedrock': { apiKeyEnv: 'AWS_BEARER_TOKEN_BEDROCK', displayName: 'Amazon Bedrock' },
   'cloudflare-workers-ai': { displayName: 'Cloudflare Workers AI' },
@@ -548,6 +569,142 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
       return {
         balances: null,
         usages: [{ label: `month spend (${currency})`, used: total, limit: null, remaining: null, percent: null, resetAt: null }],
+      }
+    },
+  },
+
+  minimax: {
+    view: 'usage',
+    match: /minimax/i,
+    async fetch(baseURL, apiKey, signal) {
+      // MiniMax Coding/Token Plan remains. The route baseURL is the
+      // Anthropic-compatible endpoint (.../anthropic); the quota endpoint
+      // hangs off the host root. Global: api.minimax.io, CN: api.minimaxi.com.
+      const origin = new URL(baseURL).origin
+      const body = await fetchJson(`${origin}/v1/api/openplatform/coding_plan/remains`, apiKey, signal)
+      const statusCode = toNumber(body?.base_resp?.status_code)
+      if (statusCode !== null && statusCode !== 0) {
+        throw new Error(String(body?.base_resp?.status_msg ?? `MiniMax API error ${statusCode}`))
+      }
+      const rows: UsageRow[] = []
+      const remains: any[] = Array.isArray(body?.model_remains) ? body.model_remains : []
+      // Only the coding lane ('general') matters; video etc. are separate plans.
+      const general = remains.find((item) => item?.model_name === 'general') ?? remains[0]
+      if (general !== null && typeof general === 'object') {
+        const intervalRemaining = toNumber(general.current_interval_remaining_percent)
+        if (intervalRemaining !== null) {
+          rows.push({
+            label: '5h limit',
+            used: 100 - intervalRemaining,
+            limit: 100,
+            remaining: intervalRemaining,
+            percent: 100 - intervalRemaining,
+            resetAt: toResetAt(general.end_time),
+          })
+        }
+        // current_weekly_status === 1 means the plan carries a weekly cap.
+        if (toNumber(general.current_weekly_status) === 1) {
+          const weeklyRemaining = toNumber(general.current_weekly_remaining_percent)
+          if (weeklyRemaining !== null) {
+            rows.push({
+              label: 'weekly',
+              used: 100 - weeklyRemaining,
+              limit: 100,
+              remaining: weeklyRemaining,
+              percent: 100 - weeklyRemaining,
+              resetAt: toResetAt(general.weekly_end_time),
+            })
+          }
+        }
+      }
+      return { balances: null, usages: rows }
+    },
+  },
+
+  zai: {
+    view: 'usage',
+    match: /api\.z\.ai|bigmodel\.cn/i,
+    async fetch(baseURL, apiKey, signal) {
+      // z.ai / GLM Coding Plan quota. The route baseURL is the coding endpoint
+      // (.../api/coding/paas/v4); the quota monitor hangs off the host root.
+      // Global: api.z.ai, CN: open.bigmodel.cn. Zhipu auth quirk: the raw key
+      // goes in Authorization with NO Bearer prefix.
+      const origin = new URL(baseURL).origin
+      const body = await fetchJson(`${origin}/api/monitor/usage/quota/limit`, apiKey, signal, {
+        authorization: apiKey,
+        'content-type': 'application/json',
+        'accept-language': 'en-US,en',
+      })
+      if (body?.success === false) {
+        throw new Error(String(body?.msg ?? body?.message ?? 'z.ai quota query failed'))
+      }
+      const limits: any[] = Array.isArray(body?.data?.limits) ? body.data.limits : []
+      // TOKENS_LIMIT entries are the coding-plan windows (percentage = used);
+      // TIME_LIMIT is the MCP lane and carries no token quota. The nearer
+      // reset is the 5h window, the further one the weekly window.
+      const tokenLimits = limits
+        .filter((item) => item?.type === 'TOKENS_LIMIT')
+        .sort((a, b) => (toNumber(a?.nextResetTime) ?? Infinity) - (toNumber(b?.nextResetTime) ?? Infinity))
+      const rows: UsageRow[] = []
+      tokenLimits.forEach((item, index) => {
+        const percent = toNumber(item?.percentage)
+        if (percent === null) return
+        rows.push({
+          label: index === 0 ? '5h limit' : index === 1 ? 'weekly' : `limit ${index + 1}`,
+          used: percent,
+          limit: 100,
+          remaining: 100 - percent,
+          percent,
+          resetAt: toResetAt(item?.nextResetTime),
+        })
+      })
+      return { balances: null, usages: rows }
+    },
+  },
+
+  opencode: {
+    view: 'usage',
+    match: /opencode\.ai/i,
+    async fetch(baseURL, apiKey, signal) {
+      // OpenCode subscription quota. Confirmed for the Go plan
+      // (/zen/go/v1/usage); the plain Zen route derives the symmetric path.
+      const base = root(baseURL)
+      const url = base.endsWith('/v1') ? `${base}/usage` : `${base}/v1/usage`
+      const body = await fetchJson(url, apiKey, signal)
+      const rows: UsageRow[] = []
+      const windows: Array<[string, any]> = [
+        ['5h limit', body?.usage?.rolling],
+        ['weekly', body?.usage?.weekly],
+        ['monthly', body?.usage?.monthly],
+      ]
+      for (const [label, win] of windows) {
+        if (win === null || typeof win !== 'object') continue
+        const percent = toNumber(win.percent)
+        if (percent === null) continue
+        rows.push({ label, used: percent, limit: 100, remaining: 100 - percent, percent, resetAt: toResetAt(win.resetsAt ?? win.resets_at) })
+      }
+      return { balances: null, usages: rows }
+    },
+  },
+
+  xai: {
+    view: 'balance',
+    match: /management-api\.x\.ai/i,
+    async fetch(baseURL, apiKey, signal) {
+      // Documented Management API only: prepaid balance needs a *management
+      // key* (not the inference key) and the team id in the path, so this
+      // adapter is reachable through a manual spec whose baseURL is
+      // https://management-api.x.ai/v1/billing/teams/{teamId} and whose
+      // apiKeyEnv holds the management key. Auto-detected api.x.ai inference
+      // routes classify as unsupported instead.
+      const body = await fetchJson(`${root(baseURL)}/prepaid/balance`, apiKey, signal)
+      // Amounts are USD cents with inverted sign: negative = credit held.
+      const cents = toNumber(body?.total?.val)
+      if (cents === null) throw new Error('no balance data in the Management API response')
+      const balance = (Math.abs(cents) / 100).toFixed(2)
+      return {
+        balances: [{ currency: 'USD', total: balance, granted: '0', toppedUp: balance }],
+        usages: null,
       }
     },
   },
