@@ -18,7 +18,8 @@
  * - `minimax`        → GET {origin}/v1/api/openplatform/coding_plan/remains (Coding Plan 5h/weekly)
  * - `zai`            → GET {origin}/api/monitor/usage/quota/limit (GLM Coding Plan 配额)
  * - `opencode`       → GET {baseURL}/usage                     (Zen Go 订阅 5h/weekly/monthly)
- * - `xai`            → GET {baseURL}/prepaid/balance           (Management key, 手动配置)
+ * - `vercel-ai-gateway` → GET {baseURL}/v1/credits             (团队 credit 余额)
+ * - `xai`            → GET {baseURL}/billing/credits           (预付余额; Management API 见注释)
  *
  * The browser widget polls `usage/list` on its own configurable interval, so
  * this service stays stateless: every call fetches live values.
@@ -96,6 +97,7 @@ const PROVIDER_KINDS = [
   'minimax',
   'zai',
   'opencode',
+  'vercel-ai-gateway',
   'xai',
 ] as const
 
@@ -687,20 +689,40 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
     },
   },
 
+  'vercel-ai-gateway': {
+    view: 'balance',
+    match: /ai-gateway\.vercel\.sh/i,
+    async fetch(baseURL, apiKey, signal) {
+      // Documented REST API: GET /v1/credits answers the team's remaining
+      // credit balance (USD string) plus lifetime spend.
+      const base = root(baseURL)
+      const url = base.endsWith('/v1') ? `${base}/credits` : `${base}/v1/credits`
+      const body = await fetchJson(url, apiKey, signal)
+      const balance = body?.balance
+      if (balance === undefined || balance === null) throw new Error('no balance in the credits response')
+      return {
+        balances: [{ currency: 'USD', total: String(balance), granted: '0', toppedUp: '0' }],
+        usages: null,
+      }
+    },
+  },
+
   xai: {
     view: 'balance',
-    match: /management-api\.x\.ai/i,
+    match: /x\.ai/i,
     async fetch(baseURL, apiKey, signal) {
-      // Documented Management API only: prepaid balance needs a *management
-      // key* (not the inference key) and the team id in the path, so this
-      // adapter is reachable through a manual spec whose baseURL is
-      // https://management-api.x.ai/v1/billing/teams/{teamId} and whose
-      // apiKeyEnv holds the management key. Auto-detected api.x.ai inference
-      // routes classify as unsupported instead.
-      const body = await fetchJson(`${root(baseURL)}/prepaid/balance`, apiKey, signal)
-      // Amounts are USD cents with inverted sign: negative = credit held.
+      // Two documented-in-practice paths:
+      // - inference route (api.x.ai/v1): undocumented but widely used
+      //   GET /v1/billing/credits with the regular inference key;
+      // - manual Management API spec (management-api.x.ai/v1/billing/teams/
+      //   {teamId}): GET .../prepaid/balance with a management key.
+      // Both answer {total:{val}} in USD cents with inverted sign
+      // (negative = credit held).
+      const base = root(baseURL)
+      const url = /management-api\.x\.ai/i.test(base) ? `${base}/prepaid/balance` : `${base}/billing/credits`
+      const body = await fetchJson(url, apiKey, signal)
       const cents = toNumber(body?.total?.val)
-      if (cents === null) throw new Error('no balance data in the Management API response')
+      if (cents === null) throw new Error('no balance data in the billing response')
       const balance = (Math.abs(cents) / 100).toFixed(2)
       return {
         balances: [{ currency: 'USD', total: balance, granted: '0', toppedUp: balance }],
