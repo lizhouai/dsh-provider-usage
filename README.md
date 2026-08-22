@@ -15,10 +15,23 @@
 ## Features
 
 - **Auto-detection** — enumerates the provider routes registered in the current profile (`ctx.llm`); zero configuration for well-known routes.
-- **Per-kind wire adapters**:
-  - **DeepSeek** (`deepseek-official`, …) → `GET {baseURL}/user/balance` (total / granted / topped-up balance)
-  - **Kimi Code subscription** (`kimi-coding`) → `GET {baseURL}/v1/usages` (weekly quota and rate-limit windows, with reset countdown)
-  - **Moonshot open platform** (`moonshotai-cn` / `moonshotai`) → `GET {baseURL}/users/me/balance`
+- **Per-kind wire adapters** — routes with no public balance/quota API (Google, Mistral, Groq, Bedrock, Azure, Qwen Token Plan, …) are listed as `unsupported` instead of being silently dropped:
+
+  | kind | routes | query | shows |
+  |---|---|---|---|
+  | `deepseek` | `deepseek-official`, `deepseek` | `GET {baseURL}/user/balance` | total / granted / topped-up balance |
+  | `moonshot` | `moonshotai-cn`, `moonshotai` | `GET {baseURL}/users/me/balance` | available / voucher / cash balance |
+  | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | weekly quota + rate-limit windows, reset countdown |
+  | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credits used / total |
+  | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | plan quota snapshots (paid) or monthly quotas (free) |
+  | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT subscription 5h / weekly windows + credits |
+  | `openai` | `openai` | `GET {origin}/v1/organization/costs` | current-month spend (**admin key required**; a regular key fails with 403) |
+  | `anthropic` | `anthropic` | `GET {baseURL}/v1/organizations/cost_report` | current-month spend (**admin key required**, `x-api-key` auth) |
+  | `minimax` | `minimax`, `minimax-cn` | `GET {origin}/v1/api/openplatform/coding_plan/remains` | Coding Plan 5h / weekly remaining % |
+  | `zai` | `zai`, `zai-coding-cn` | `GET {origin}/api/monitor/usage/quota/limit` | GLM Coding Plan windows (raw key in `Authorization`, no Bearer) |
+  | `opencode` | `opencode`, `opencode-go` | `GET {baseURL}/usage` | Zen Go rolling / weekly / monthly windows |
+  | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | team credit balance |
+  | `xai` | `xai` | `GET {baseURL}/billing/credits` | prepaid balance (USD) |
 - **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk.
 - **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The halo around the ball encodes provider health: green all good, amber some quota below 30% left, red on query failure / missing key / usage ≥90%.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
@@ -83,7 +96,7 @@ Defaults work out of the box: the plugin auto-detects every provider route of th
 | --- | --- | --- | --- |
 | `refreshSeconds` | number | `60` | Suggested widget refresh interval in seconds (5–86400) |
 | `autoDetect` | boolean | `true` | Enumerate live provider routes from the llm registry |
-| `providers` | array | `[]` | Manual provider specs: `{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`, `kind ∈ deepseek / kimi-coding / moonshot` |
+| `providers` | array | `[]` | Manual provider specs: `{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`; `kind` is one of the adapter table above |
 
 The same fields can be hot-updated under the `provider-usage:` namespace in `~/.dsh/settings.yaml`.
 

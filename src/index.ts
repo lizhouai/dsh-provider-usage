@@ -5,11 +5,21 @@
  * of every configured LLM provider route. Provider routes are auto-detected
  * from the live `llm` registry plus the composed settings sections, keys are
  * resolved per request through the credentials service (never cached), and
- * each provider kind has its own wire adapter:
+ * each provider kind has its own wire adapter (see ADAPTERS below):
  *
- * - `deepseek`    → GET {baseURL}/user/balance          (充值余额)
- * - `kimi-coding` → GET {baseURL}/v1/usages             (订阅配额, weekly / 5h windows)
- * - `moonshot`    → GET {baseURL}/users/me/balance      (开放平台余额)
+ * - `deepseek`       → GET {baseURL}/user/balance              (充值余额)
+ * - `kimi-coding`    → GET {baseURL}/v1/usages                 (订阅配额, weekly / 5h windows)
+ * - `moonshot`       → GET {baseURL}/users/me/balance          (开放平台余额)
+ * - `openrouter`     → GET {origin}/api/v1/credits             (credit 总额与已用量)
+ * - `github-copilot` → GET api.github.com/copilot_internal/user (订阅配额快照, OAuth token)
+ * - `openai-codex`   → GET {baseURL}/wham/usage                (ChatGPT 订阅 5h/weekly 窗口)
+ * - `openai`         → GET {origin}/v1/organization/costs      (Admin key, 当月花费)
+ * - `anthropic`      → GET {baseURL}/v1/organizations/cost_report (Admin key, 当月花费)
+ * - `minimax`        → GET {origin}/v1/api/openplatform/coding_plan/remains (Coding Plan 5h/weekly)
+ * - `zai`            → GET {origin}/api/monitor/usage/quota/limit (GLM Coding Plan 配额)
+ * - `opencode`       → GET {baseURL}/usage                     (Zen Go 订阅 5h/weekly/monthly)
+ * - `vercel-ai-gateway` → GET {baseURL}/v1/credits             (团队 credit 余额)
+ * - `xai`            → GET {baseURL}/billing/credits           (预付余额; Management API 见注释)
  *
  * The browser widget polls `usage/list` on its own configurable interval, so
  * this service stays stateless: every call fetches live values.
@@ -72,13 +82,51 @@ export interface UsageListResult {
 }
 
 /* ------------------------------------------------------------------ *
+ * Provider kinds & adapters
+ * ------------------------------------------------------------------ */
+
+const PROVIDER_KINDS = [
+  'deepseek',
+  'kimi-coding',
+  'moonshot',
+  'openrouter',
+  'github-copilot',
+  'openai-codex',
+  'openai',
+  'anthropic',
+  'minimax',
+  'zai',
+  'opencode',
+  'vercel-ai-gateway',
+  'xai',
+] as const
+
+type ProviderKind = (typeof PROVIDER_KINDS)[number]
+
+/** What one quota probe returns: either balance rows or usage windows. */
+interface AdapterPayload {
+  balances: BalanceRow[] | null
+  usages: UsageRow[] | null
+}
+
+interface QuotaAdapter {
+  /** Panel data shape this adapter produces. */
+  view: 'balance' | 'usage'
+  /** Auto-classification: a route whose baseURL matches belongs to this kind. */
+  match: RegExp
+  /** Extra request headers beyond Authorization/Accept. */
+  headers?: Record<string, string>
+  fetch(baseURL: string, apiKey: string, signal: AbortSignal): Promise<AdapterPayload>
+}
+
+/* ------------------------------------------------------------------ *
  * Config
  * ------------------------------------------------------------------ */
 
 const ProviderSpec = z.object({
   /** Route id this spec describes (manual specs may use any unique id). */
   id: z.string(),
-  kind: z.union(['deepseek', 'kimi-coding', 'moonshot']),
+  kind: z.union(PROVIDER_KINDS),
   baseURL: z.string(),
   apiKeyEnv: z.string().role('credential-ref'),
   displayName: z.string().default(''),
@@ -99,15 +147,13 @@ export interface ProviderUsageConfig {
   autoDetect: boolean
   providers: Array<{
     id: string
-    kind: 'deepseek' | 'kimi-coding' | 'moonshot'
+    kind: ProviderKind
     baseURL: string
     apiKeyEnv: string
     displayName: string
     enabled: boolean
   }>
 }
-
-type ProviderKind = 'deepseek' | 'kimi-coding' | 'moonshot'
 
 interface ResolvedProvider {
   id: string
@@ -129,20 +175,58 @@ type DetectedProvider = ResolvedProvider | UnsupportedRoute
  * Provider route auto-detection
  * ------------------------------------------------------------------ */
 
-/** Catalog fallback for well-known routes when the settings section omits connection facts. */
-const KNOWN_ROUTES: Record<string, { baseURL: string; apiKeyEnv: string; displayName: string }> = {
+/**
+ * Catalog fallback for well-known routes when the settings section omits
+ * connection facts. Mirrors the pi-ai catalog shipped with the harness, plus
+ * the harness's own `deepseek-official` route; routes without a fixed
+ * baseURL (cloud/OAuth providers) rely on the settings profile instead.
+ */
+const KNOWN_ROUTES: Record<string, { baseURL?: string; apiKeyEnv?: string; displayName: string }> = {
   'deepseek-official': { baseURL: 'https://api.deepseek.com', apiKeyEnv: 'DEEPSEEK_API_KEY', displayName: 'DeepSeek' },
   deepseek: { baseURL: 'https://api.deepseek.com', apiKeyEnv: 'DEEPSEEK_API_KEY', displayName: 'DeepSeek' },
   'kimi-coding': { baseURL: 'https://api.kimi.com/coding', apiKeyEnv: 'KIMI_API_KEY', displayName: 'Kimi Code' },
-  'moonshotai-cn': { baseURL: 'https://api.moonshot.cn/v1', apiKeyEnv: 'MOONSHOT_API_KEY', displayName: 'Moonshot' },
-  moonshotai: { baseURL: 'https://api.moonshot.ai/v1', apiKeyEnv: 'MOONSHOT_API_KEY', displayName: 'Moonshot' },
+  'moonshotai-cn': { baseURL: 'https://api.moonshot.cn/v1', apiKeyEnv: 'MOONSHOT_API_KEY', displayName: 'Moonshot AI CN' },
+  moonshotai: { baseURL: 'https://api.moonshot.ai/v1', apiKeyEnv: 'MOONSHOT_API_KEY', displayName: 'Moonshot AI' },
+  openrouter: { baseURL: 'https://openrouter.ai/api/v1', apiKeyEnv: 'OPENROUTER_API_KEY', displayName: 'OpenRouter' },
+  anthropic: { baseURL: 'https://api.anthropic.com', apiKeyEnv: 'ANTHROPIC_API_KEY', displayName: 'Anthropic' },
+  openai: { baseURL: 'https://api.openai.com/v1', apiKeyEnv: 'OPENAI_API_KEY', displayName: 'OpenAI' },
+  'openai-codex': { baseURL: 'https://chatgpt.com/backend-api', displayName: 'OpenAI Codex' },
+  google: { baseURL: 'https://generativelanguage.googleapis.com/v1beta', apiKeyEnv: 'GEMINI_API_KEY', displayName: 'Google' },
+  'google-vertex': { apiKeyEnv: 'GOOGLE_CLOUD_API_KEY', displayName: 'Google Vertex' },
+  xai: { baseURL: 'https://api.x.ai/v1', apiKeyEnv: 'XAI_API_KEY', displayName: 'xAI' },
+  mistral: { baseURL: 'https://api.mistral.ai', apiKeyEnv: 'MISTRAL_API_KEY', displayName: 'Mistral' },
+  groq: { baseURL: 'https://api.groq.com/openai/v1', apiKeyEnv: 'GROQ_API_KEY', displayName: 'Groq' },
+  cerebras: { baseURL: 'https://api.cerebras.ai/v1', apiKeyEnv: 'CEREBRAS_API_KEY', displayName: 'Cerebras' },
+  fireworks: { baseURL: 'https://api.fireworks.ai/inference', apiKeyEnv: 'FIREWORKS_API_KEY', displayName: 'Fireworks' },
+  together: { baseURL: 'https://api.together.ai/v1', apiKeyEnv: 'TOGETHER_API_KEY', displayName: 'Together' },
+  nvidia: { baseURL: 'https://integrate.api.nvidia.com/v1', apiKeyEnv: 'NVIDIA_API_KEY', displayName: 'NVIDIA' },
+  huggingface: { baseURL: 'https://router.huggingface.co/v1', apiKeyEnv: 'HF_TOKEN', displayName: 'Hugging Face' },
+  'github-copilot': { baseURL: 'https://api.individual.githubcopilot.com', apiKeyEnv: 'COPILOT_GITHUB_TOKEN', displayName: 'GitHub Copilot' },
+  'vercel-ai-gateway': { baseURL: 'https://ai-gateway.vercel.sh', apiKeyEnv: 'AI_GATEWAY_API_KEY', displayName: 'Vercel AI Gateway' },
+  'ant-ling': { baseURL: 'https://api.ant-ling.com/v1', apiKeyEnv: 'ANT_LING_API_KEY', displayName: 'Ant Ling' },
+  minimax: { baseURL: 'https://api.minimax.io/anthropic', apiKeyEnv: 'MINIMAX_API_KEY', displayName: 'MiniMax' },
+  'minimax-cn': { baseURL: 'https://api.minimaxi.com/anthropic', apiKeyEnv: 'MINIMAX_CN_API_KEY', displayName: 'MiniMax CN' },
+  zai: { baseURL: 'https://api.z.ai/api/coding/paas/v4', apiKeyEnv: 'ZAI_API_KEY', displayName: 'Z.AI' },
+  'zai-coding-cn': { baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4', apiKeyEnv: 'ZAI_CODING_CN_API_KEY', displayName: 'Z.AI Coding CN' },
+  'qwen-token-plan': { baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1', apiKeyEnv: 'QWEN_TOKEN_PLAN_API_KEY', displayName: 'Qwen Token Plan' },
+  'qwen-token-plan-cn': { baseURL: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', apiKeyEnv: 'QWEN_TOKEN_PLAN_CN_API_KEY', displayName: 'Qwen Token Plan CN' },
+  xiaomi: { baseURL: 'https://api.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_API_KEY', displayName: 'Xiaomi MiMo' },
+  'xiaomi-token-plan-ams': { baseURL: 'https://token-plan-ams.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_TOKEN_PLAN_AMS_API_KEY', displayName: 'Xiaomi Token Plan AMS' },
+  'xiaomi-token-plan-cn': { baseURL: 'https://token-plan-cn.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_TOKEN_PLAN_CN_API_KEY', displayName: 'Xiaomi Token Plan CN' },
+  'xiaomi-token-plan-sgp': { baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_TOKEN_PLAN_SGP_API_KEY', displayName: 'Xiaomi Token Plan SGP' },
+  opencode: { baseURL: 'https://opencode.ai/zen/v1', apiKeyEnv: 'OPENCODE_API_KEY', displayName: 'OpenCode Zen' },
+  'opencode-go': { baseURL: 'https://opencode.ai/zen/go/v1', apiKeyEnv: 'OPENCODE_API_KEY', displayName: 'OpenCode Zen Go' },
+  'azure-openai-responses': { apiKeyEnv: 'AZURE_OPENAI_API_KEY', displayName: 'Azure OpenAI' },
+  'amazon-bedrock': { apiKeyEnv: 'AWS_BEARER_TOKEN_BEDROCK', displayName: 'Amazon Bedrock' },
+  'cloudflare-workers-ai': { displayName: 'Cloudflare Workers AI' },
+  'cloudflare-ai-gateway': { displayName: 'Cloudflare AI Gateway' },
 }
 
 /** Classify a provider endpoint by host; returns null for endpoints with no quota adapter. */
 function kindOfBaseURL(baseURL: string): ProviderKind | null {
-  if (/api\.kimi\.com\/coding/i.test(baseURL)) return 'kimi-coding'
-  if (/moonshot/i.test(baseURL)) return 'moonshot'
-  if (/deepseek/i.test(baseURL)) return 'deepseek'
+  for (const kind of PROVIDER_KINDS) {
+    if (ADAPTERS[kind].match.test(baseURL)) return kind
+  }
   return null
 }
 
@@ -234,9 +318,15 @@ function parseKimiUsages(payload: any): UsageRow[] {
  * ------------------------------------------------------------------ */
 
 async function fetchJson(url: string, apiKey: string, signal: AbortSignal, extraHeaders: Record<string, string> = {}): Promise<any> {
+  // Adapters with a non-Bearer credential (x-api-key, `token <oauth>`) pass it
+  // through extraHeaders; only then is the default Bearer header withheld.
+  const hasAuth = Object.keys(extraHeaders).some((h) => {
+    const lower = h.toLowerCase()
+    return lower === 'authorization' || lower === 'x-api-key'
+  })
   const response = await fetch(url, {
     method: 'GET',
-    headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json', ...extraHeaders },
+    headers: { accept: 'application/json', ...(hasAuth ? {} : { authorization: `Bearer ${apiKey}` }), ...extraHeaders },
     signal,
   })
   const text = await response.text()
@@ -259,6 +349,387 @@ function okView(base: Omit<ProviderUsageView, 'status' | 'message'>): ProviderUs
 
 function failView(id: string, displayName: string, kind: ProviderUsageView['kind'], status: ProviderUsageView['status'], message: string): ProviderUsageView {
   return { id, displayName, kind, status, message, balances: null, usages: null }
+}
+
+/** Strip trailing slashes from a route baseURL. */
+function root(baseURL: string): string {
+  return baseURL.replace(/\/+$/, '')
+}
+
+/* ------------------------------------------------------------------ *
+ * Quota adapters — one per ProviderKind
+ * ------------------------------------------------------------------ */
+
+const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
+  deepseek: {
+    view: 'balance',
+    match: /deepseek/i,
+    async fetch(baseURL, apiKey, signal) {
+      const body = await fetchJson(`${root(baseURL)}/user/balance`, apiKey, signal)
+      const infos: any[] = Array.isArray(body?.balance_infos) ? body.balance_infos : []
+      return {
+        balances: infos.map((info) => ({
+          currency: String(info.currency ?? ''),
+          total: String(info.total_balance ?? '0'),
+          granted: String(info.granted_balance ?? '0'),
+          toppedUp: String(info.topped_up_balance ?? '0'),
+        })),
+        usages: null,
+      }
+    },
+  },
+
+  'kimi-coding': {
+    view: 'usage',
+    match: /api\.kimi\.com\/coding/i,
+    headers: { 'user-agent': 'KimiCLI/1.6' },
+    async fetch(baseURL, apiKey, signal) {
+      const base = root(baseURL)
+      const url = base.endsWith('/v1') ? `${base}/usages` : `${base}/v1/usages`
+      const body = await fetchJson(url, apiKey, signal, this.headers)
+      return { balances: null, usages: parseKimiUsages(body) }
+    },
+  },
+
+  moonshot: {
+    view: 'balance',
+    match: /moonshot/i,
+    async fetch(baseURL, apiKey, signal) {
+      const body = await fetchJson(`${root(baseURL)}/users/me/balance`, apiKey, signal)
+      const data = body?.data ?? {}
+      return {
+        balances: [{
+          currency: String(data.currency ?? 'CNY'),
+          total: String(data.available_balance ?? '0'),
+          granted: String(data.voucher_balance ?? '0'),
+          toppedUp: String(data.cash_balance ?? '0'),
+        }],
+        usages: null,
+      }
+    },
+  },
+
+  openrouter: {
+    view: 'usage',
+    match: /openrouter\.ai/i,
+    async fetch(baseURL, apiKey, signal) {
+      // The route baseURL is https://openrouter.ai/api/v1; credits lives one level up.
+      const origin = root(baseURL).replace(/\/api\/v1$/, '')
+      const body = await fetchJson(`${origin}/api/v1/credits`, apiKey, signal)
+      const data = body?.data ?? {}
+      const limit = toNumber(data.total_credits)
+      const used = toNumber(data.total_usage)
+      const remaining = limit !== null && used !== null ? limit - used : null
+      return {
+        balances: null,
+        usages: [{
+          label: 'credits',
+          used,
+          limit,
+          remaining,
+          percent: limit !== null && limit > 0 && used !== null ? (used / limit) * 100 : null,
+          resetAt: null,
+        }],
+      }
+    },
+  },
+
+  'github-copilot': {
+    view: 'usage',
+    match: /githubcopilot\.com|copilot/i,
+    async fetch(_baseURL, apiKey, signal) {
+      // Undocumented but stable internal endpoint used by every community quota
+      // tool; the credential is the GitHub OAuth token, sent with the `token`
+      // scheme rather than Bearer. Editor headers are required.
+      const body = await fetchJson('https://api.github.com/copilot_internal/user', apiKey, signal, {
+        authorization: `token ${apiKey}`,
+        'editor-version': 'vscode/1.96.2',
+        'editor-plugin-version': 'copilot-chat/0.26.7',
+        'user-agent': 'GitHubCopilotChat/0.26.7',
+        'x-github-api-version': '2025-04-01',
+      })
+      const rows: UsageRow[] = []
+      const resetAt = toResetAt(body?.quota_reset_date) ?? toResetAt(body?.limited_user_reset_date)
+      const snapshots = body?.quota_snapshots
+      if (snapshots !== null && typeof snapshots === 'object') {
+        // Paid plans: per-feature snapshots with entitlement/remaining.
+        for (const [key, snap] of Object.entries<any>(snapshots)) {
+          if (snap === null || typeof snap !== 'object') continue
+          const entitlement = toNumber(snap.entitlement)
+          const remaining = toNumber(snap.remaining)
+          if (entitlement === null && remaining === null) continue
+          const percentRemaining = toNumber(snap.percent_remaining)
+          const used = entitlement !== null && remaining !== null ? entitlement - remaining : null
+          const percent = percentRemaining !== null
+            ? 100 - percentRemaining
+            : entitlement !== null && entitlement > 0 && used !== null ? (used / entitlement) * 100 : null
+          rows.push({ label: String(snap.quota_id ?? key), used, limit: entitlement, remaining, percent, resetAt })
+        }
+      } else {
+        // Free limited plan: monthly quotas minus limited-user remainder.
+        const limited = body?.limited_user_quotas ?? {}
+        const monthly = body?.monthly_quotas ?? {}
+        for (const key of ['chat', 'completions']) {
+          const limit = toNumber(monthly[key])
+          const remaining = toNumber(limited[key])
+          if (limit === null && remaining === null) continue
+          const used = limit !== null && remaining !== null ? limit - remaining : null
+          rows.push({
+            label: key,
+            used,
+            limit,
+            remaining,
+            percent: limit !== null && limit > 0 && used !== null ? (used / limit) * 100 : null,
+            resetAt,
+          })
+        }
+      }
+      return { balances: null, usages: rows }
+    },
+  },
+
+  'openai-codex': {
+    view: 'usage',
+    match: /chatgpt\.com\/backend-api/i,
+    async fetch(baseURL, apiKey, signal) {
+      // ChatGPT subscription side endpoint (OAuth access token, not an API key).
+      const body = await fetchJson(`${root(baseURL)}/wham/usage`, apiKey, signal)
+      const rows: UsageRow[] = []
+      const windowRow = (label: string, win: any) => {
+        if (win === null || typeof win !== 'object') return
+        const percent = toNumber(win.used_percent)
+        if (percent === null) return
+        rows.push({ label, used: percent, limit: 100, remaining: 100 - percent, percent, resetAt: toResetAt(win.reset_at) })
+      }
+      windowRow('5h limit', body?.rate_limit?.primary_window)
+      windowRow('weekly', body?.rate_limit?.secondary_window)
+      const extra = body?.additional_rate_limits
+      if (Array.isArray(extra)) {
+        for (const item of extra) {
+          windowRow(String(item?.limit_name ?? item?.metered_feature ?? 'limit'), item?.rate_limit?.primary_window)
+        }
+      }
+      const credits = toNumber(body?.credits?.balance)
+      if (credits !== null) {
+        rows.push({ label: 'credits', used: null, limit: null, remaining: credits, percent: null, resetAt: null })
+      }
+      return { balances: null, usages: rows }
+    },
+  },
+
+  openai: {
+    view: 'usage',
+    match: /api\.openai\.com/i,
+    async fetch(baseURL, apiKey, signal) {
+      // No balance endpoint exists; the organization costs report (admin keys
+      // only) is the closest live signal. A regular sk- key fails with 403,
+      // which the panel surfaces as the query error.
+      const base = root(baseURL).replace(/\/v1$/, '')
+      const monthStart = new Date()
+      monthStart.setUTCDate(1)
+      monthStart.setUTCHours(0, 0, 0, 0)
+      const startTime = Math.floor(monthStart.getTime() / 1000)
+      const body = await fetchJson(`${base}/v1/organization/costs?start_time=${startTime}`, apiKey, signal)
+      let total = 0
+      let currency = 'USD'
+      for (const bucket of body?.data ?? []) {
+        for (const result of bucket?.results ?? []) {
+          total += toNumber(result?.amount?.value) ?? 0
+          if (result?.amount?.currency) currency = String(result.amount.currency).toUpperCase()
+        }
+      }
+      return {
+        balances: null,
+        usages: [{ label: `month spend (${currency})`, used: total, limit: null, remaining: null, percent: null, resetAt: null }],
+      }
+    },
+  },
+
+  anthropic: {
+    view: 'usage',
+    match: /api\.anthropic\.com/i,
+    async fetch(baseURL, apiKey, signal) {
+      // Admin API: x-api-key auth (not Bearer), admin keys only; prepaid
+      // balance is not exposed, so this reports the current month's spend.
+      const monthStart = new Date()
+      monthStart.setUTCDate(1)
+      monthStart.setUTCHours(0, 0, 0, 0)
+      const body = await fetchJson(
+        `${root(baseURL)}/v1/organizations/cost_report?starting_at=${encodeURIComponent(monthStart.toISOString())}`,
+        apiKey,
+        signal,
+        { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      )
+      let total = 0
+      let currency = 'USD'
+      for (const bucket of body?.data ?? []) {
+        for (const result of bucket?.results ?? []) {
+          total += toNumber(result?.amount) ?? 0
+          if (result?.currency) currency = String(result.currency).toUpperCase()
+        }
+      }
+      return {
+        balances: null,
+        usages: [{ label: `month spend (${currency})`, used: total, limit: null, remaining: null, percent: null, resetAt: null }],
+      }
+    },
+  },
+
+  minimax: {
+    view: 'usage',
+    match: /minimax/i,
+    async fetch(baseURL, apiKey, signal) {
+      // MiniMax Coding/Token Plan remains. The route baseURL is the
+      // Anthropic-compatible endpoint (.../anthropic); the quota endpoint
+      // hangs off the host root. Global: api.minimax.io, CN: api.minimaxi.com.
+      const origin = new URL(baseURL).origin
+      const body = await fetchJson(`${origin}/v1/api/openplatform/coding_plan/remains`, apiKey, signal)
+      const statusCode = toNumber(body?.base_resp?.status_code)
+      if (statusCode !== null && statusCode !== 0) {
+        throw new Error(String(body?.base_resp?.status_msg ?? `MiniMax API error ${statusCode}`))
+      }
+      const rows: UsageRow[] = []
+      const remains: any[] = Array.isArray(body?.model_remains) ? body.model_remains : []
+      // Only the coding lane ('general') matters; video etc. are separate plans.
+      const general = remains.find((item) => item?.model_name === 'general') ?? remains[0]
+      if (general !== null && typeof general === 'object') {
+        const intervalRemaining = toNumber(general.current_interval_remaining_percent)
+        if (intervalRemaining !== null) {
+          rows.push({
+            label: '5h limit',
+            used: 100 - intervalRemaining,
+            limit: 100,
+            remaining: intervalRemaining,
+            percent: 100 - intervalRemaining,
+            resetAt: toResetAt(general.end_time),
+          })
+        }
+        // current_weekly_status === 1 means the plan carries a weekly cap.
+        if (toNumber(general.current_weekly_status) === 1) {
+          const weeklyRemaining = toNumber(general.current_weekly_remaining_percent)
+          if (weeklyRemaining !== null) {
+            rows.push({
+              label: 'weekly',
+              used: 100 - weeklyRemaining,
+              limit: 100,
+              remaining: weeklyRemaining,
+              percent: 100 - weeklyRemaining,
+              resetAt: toResetAt(general.weekly_end_time),
+            })
+          }
+        }
+      }
+      return { balances: null, usages: rows }
+    },
+  },
+
+  zai: {
+    view: 'usage',
+    match: /api\.z\.ai|bigmodel\.cn/i,
+    async fetch(baseURL, apiKey, signal) {
+      // z.ai / GLM Coding Plan quota. The route baseURL is the coding endpoint
+      // (.../api/coding/paas/v4); the quota monitor hangs off the host root.
+      // Global: api.z.ai, CN: open.bigmodel.cn. Zhipu auth quirk: the raw key
+      // goes in Authorization with NO Bearer prefix.
+      const origin = new URL(baseURL).origin
+      const body = await fetchJson(`${origin}/api/monitor/usage/quota/limit`, apiKey, signal, {
+        authorization: apiKey,
+        'content-type': 'application/json',
+        'accept-language': 'en-US,en',
+      })
+      if (body?.success === false) {
+        throw new Error(String(body?.msg ?? body?.message ?? 'z.ai quota query failed'))
+      }
+      const limits: any[] = Array.isArray(body?.data?.limits) ? body.data.limits : []
+      // TOKENS_LIMIT entries are the coding-plan windows (percentage = used);
+      // TIME_LIMIT is the MCP lane and carries no token quota. The nearer
+      // reset is the 5h window, the further one the weekly window.
+      const tokenLimits = limits
+        .filter((item) => item?.type === 'TOKENS_LIMIT')
+        .sort((a, b) => (toNumber(a?.nextResetTime) ?? Infinity) - (toNumber(b?.nextResetTime) ?? Infinity))
+      const rows: UsageRow[] = []
+      tokenLimits.forEach((item, index) => {
+        const percent = toNumber(item?.percentage)
+        if (percent === null) return
+        rows.push({
+          label: index === 0 ? '5h limit' : index === 1 ? 'weekly' : `limit ${index + 1}`,
+          used: percent,
+          limit: 100,
+          remaining: 100 - percent,
+          percent,
+          resetAt: toResetAt(item?.nextResetTime),
+        })
+      })
+      return { balances: null, usages: rows }
+    },
+  },
+
+  opencode: {
+    view: 'usage',
+    match: /opencode\.ai/i,
+    async fetch(baseURL, apiKey, signal) {
+      // OpenCode subscription quota. Confirmed for the Go plan
+      // (/zen/go/v1/usage); the plain Zen route derives the symmetric path.
+      const base = root(baseURL)
+      const url = base.endsWith('/v1') ? `${base}/usage` : `${base}/v1/usage`
+      const body = await fetchJson(url, apiKey, signal)
+      const rows: UsageRow[] = []
+      const windows: Array<[string, any]> = [
+        ['5h limit', body?.usage?.rolling],
+        ['weekly', body?.usage?.weekly],
+        ['monthly', body?.usage?.monthly],
+      ]
+      for (const [label, win] of windows) {
+        if (win === null || typeof win !== 'object') continue
+        const percent = toNumber(win.percent)
+        if (percent === null) continue
+        rows.push({ label, used: percent, limit: 100, remaining: 100 - percent, percent, resetAt: toResetAt(win.resetsAt ?? win.resets_at) })
+      }
+      return { balances: null, usages: rows }
+    },
+  },
+
+  'vercel-ai-gateway': {
+    view: 'balance',
+    match: /ai-gateway\.vercel\.sh/i,
+    async fetch(baseURL, apiKey, signal) {
+      // Documented REST API: GET /v1/credits answers the team's remaining
+      // credit balance (USD string) plus lifetime spend.
+      const base = root(baseURL)
+      const url = base.endsWith('/v1') ? `${base}/credits` : `${base}/v1/credits`
+      const body = await fetchJson(url, apiKey, signal)
+      const balance = body?.balance
+      if (balance === undefined || balance === null) throw new Error('no balance in the credits response')
+      return {
+        balances: [{ currency: 'USD', total: String(balance), granted: '0', toppedUp: '0' }],
+        usages: null,
+      }
+    },
+  },
+
+  xai: {
+    view: 'balance',
+    match: /x\.ai/i,
+    async fetch(baseURL, apiKey, signal) {
+      // Two documented-in-practice paths:
+      // - inference route (api.x.ai/v1): undocumented but widely used
+      //   GET /v1/billing/credits with the regular inference key;
+      // - manual Management API spec (management-api.x.ai/v1/billing/teams/
+      //   {teamId}): GET .../prepaid/balance with a management key.
+      // Both answer {total:{val}} in USD cents with inverted sign
+      // (negative = credit held).
+      const base = root(baseURL)
+      const url = /management-api\.x\.ai/i.test(base) ? `${base}/prepaid/balance` : `${base}/billing/credits`
+      const body = await fetchJson(url, apiKey, signal)
+      const cents = toNumber(body?.total?.val)
+      if (cents === null) throw new Error('no balance data in the billing response')
+      const balance = (Math.abs(cents) / 100).toFixed(2)
+      return {
+        balances: [{ currency: 'USD', total: balance, granted: '0', toppedUp: balance }],
+        usages: null,
+      }
+    },
+  },
 }
 
 /* ------------------------------------------------------------------ *
@@ -364,50 +835,20 @@ export class UsageService extends TypertRemoteService {
     if ('unsupported' in spec) {
       return failView(spec.route.id, spec.route.name || spec.route.id, null, 'unsupported', spec.route.id)
     }
-    const kind: ProviderUsageView['kind'] = spec.kind === 'kimi-coding' ? 'usage' : 'balance'
-    const base = { id: spec.id, displayName: spec.displayName, kind, balances: null, usages: null }
+    const adapter = ADAPTERS[spec.kind]
+    const base = { id: spec.id, displayName: spec.displayName, kind: adapter.view, balances: null, usages: null }
     const apiKey = await this.resolveApiKey(spec.apiKeyEnv)
     if (apiKey === undefined) {
-      return failView(spec.id, spec.displayName, kind, 'missing-credential', spec.apiKeyEnv)
+      return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', spec.apiKeyEnv)
     }
     const signal = AbortSignal.any([AbortSignal.timeout(15000), ...(outerSignal ? [outerSignal] : [])])
     try {
-      if (spec.kind === 'deepseek') {
-        const body = await fetchJson(`${spec.baseURL.replace(/\/+$/, '')}/user/balance`, apiKey, signal)
-        const infos: any[] = Array.isArray(body?.balance_infos) ? body.balance_infos : []
-        return okView({
-          ...base,
-          balances: infos.map((info) => ({
-            currency: String(info.currency ?? ''),
-            total: String(info.total_balance ?? '0'),
-            granted: String(info.granted_balance ?? '0'),
-            toppedUp: String(info.topped_up_balance ?? '0'),
-          })),
-          usages: null,
-        })
-      }
-      if (spec.kind === 'kimi-coding') {
-        const root = spec.baseURL.replace(/\/+$/, '')
-        const url = root.endsWith('/v1') ? `${root}/usages` : `${root}/v1/usages`
-        const body = await fetchJson(url, apiKey, signal, { 'user-agent': 'KimiCLI/1.6' })
-        return okView({ ...base, balances: null, usages: parseKimiUsages(body) })
-      }
-      const body = await fetchJson(`${spec.baseURL.replace(/\/+$/, '')}/users/me/balance`, apiKey, signal)
-      const data = body?.data ?? {}
-      return okView({
-        ...base,
-        balances: [{
-          currency: String(data.currency ?? 'CNY'),
-          total: String(data.available_balance ?? '0'),
-          granted: String(data.voucher_balance ?? '0'),
-          toppedUp: String(data.cash_balance ?? '0'),
-        }],
-        usages: null,
-      })
+      const payload = await adapter.fetch(spec.baseURL, apiKey, signal)
+      return okView({ ...base, ...payload })
     } catch (error) {
       if (outerSignal?.aborted) throw error
       const message = error instanceof Error ? error.message : String(error)
-      return failView(spec.id, spec.displayName, kind, 'error', message)
+      return failView(spec.id, spec.displayName, adapter.view, 'error', message)
     }
   }
 }

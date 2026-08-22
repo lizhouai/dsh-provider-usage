@@ -1,0 +1,184 @@
+{
+  "$comment": "LLM provider 余额/配额查询接口调研结论（机器可读版）。详见 provider-quota-endpoints.md。均经官方文档/开源实现验证，未臆造端点。",
+  "providers": [
+    {
+      "id": "openai",
+      "support": "partial",
+      "credentialType": "admin_api_key",
+      "credentialHint": "OpenAI Admin key (sk-admin-...)，platform.openai.com → Organization → Admin keys；普通 sk- key 与 project service-account key 均不可用",
+      "endpoints": [
+        {
+          "kind": "cost",
+          "method": "GET",
+          "url": "https://api.openai.com/v1/organization/costs",
+          "headers": { "Authorization": "Bearer {ADMIN_KEY}" },
+          "query": {
+            "start_time": "unix 秒，必填",
+            "end_time": "unix 秒",
+            "bucket_width": "1d|1h|1m",
+            "group_by": "project_id|line_item",
+            "project_ids": "proj_... 可重复",
+            "limit": "int", "page": "cursor"
+          },
+          "responseShape": "{ object:'page', data:[{ start_time, end_time, results:[{ amount:{value,currency}, line_item, project_id }] }], has_more, next_page }"
+        },
+        {
+          "kind": "usage",
+          "method": "GET",
+          "url": "https://api.openai.com/v1/organization/usage/completions",
+          "headers": { "Authorization": "Bearer {ADMIN_KEY}" },
+          "query": { "start_time": "unix 秒，必填", "bucket_width": "1d|1h|1m", "group_by": "model|project_id|api_key_id|..." },
+          "responseShape": "{ data:[{ results:[{ model, input_tokens, output_tokens, input_cached_tokens, num_model_requests }] }], has_more, next_page }",
+          "siblings": ["embeddings", "images", "moderations", "audio_speeches", "audio_transcriptions", "vector_stores", "code_interpreter_sessions"]
+        },
+        {
+          "kind": "balance_legacy_best_effort",
+          "method": "GET",
+          "url": "https://api.openai.com/v1/dashboard/billing/credit_grants",
+          "headers": { "Authorization": "Bearer {LEGACY_USER_KEY}" },
+          "responseShape": "{ object:'credit_summary', total_granted, total_used, total_available, expires_at }",
+          "warnings": ["不在现行公开 API 文档", "多数普通 key 已失效", "仅作静默兜底，失败视为不可用"]
+        }
+      ],
+      "consoleUrl": "https://platform.openai.com/usage",
+      "sources": [
+        "https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs",
+        "https://github.com/steipete/CodexBar/blob/main/docs/openai.md"
+      ]
+    },
+    {
+      "id": "openai-codex",
+      "support": "yes_oauth_only",
+      "credentialType": "oauth_access_token",
+      "credentialHint": "~/.codex/auth.json 中的 ChatGPT/Codex OAuth access token；stale 时引导用户运行 codex CLI，不要自行回写 auth.json",
+      "endpoints": [
+        {
+          "kind": "rate_limit_windows",
+          "method": "GET",
+          "url": "https://chatgpt.com/backend-api/wham/usage",
+          "headers": { "Authorization": "Bearer {OAUTH_TOKEN}" },
+          "responseShape": "{ plan_type, rate_limit:{ allowed, limit_reached, primary_window:{used_percent,limit_window_seconds,reset_after_seconds,reset_at}, secondary_window:{...} }, additional_rate_limits:[], credits:{has_credits,unlimited,balance} }",
+          "mapping": { "primary_window": "5 小时会话窗口", "secondary_window": "周窗口" }
+        },
+        {
+          "kind": "reset_credits",
+          "method": "GET",
+          "url": "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+          "headers": { "Authorization": "Bearer {OAUTH_TOKEN}" }
+        }
+      ],
+      "alternatives": ["本地 codex app-server JSON-RPC: account/read, account/rateLimits/read"],
+      "warnings": ["未公开内部接口，可能随时变更"],
+      "consoleUrl": "https://chatgpt.com/codex/settings/usage",
+      "sources": ["https://github.com/steipete/CodexBar/blob/main/docs/codex.md"]
+    },
+    {
+      "id": "anthropic",
+      "support": "partial",
+      "credentialType": "admin_api_key",
+      "credentialHint": "Anthropic Admin key (sk-ant-admin-...)，Console → Settings → Admin keys；普通 sk-ant-api key 不可用；认证头是 x-api-key 而非 Bearer",
+      "endpoints": [
+        {
+          "kind": "usage",
+          "method": "GET",
+          "url": "https://api.anthropic.com/v1/organizations/usage_report/messages",
+          "headers": { "x-api-key": "{ADMIN_KEY}", "anthropic-version": "2023-06-01" },
+          "query": {
+            "starting_at": "RFC3339，必填",
+            "ending_at": "RFC3339",
+            "bucket_width": "1d|1h",
+            "group_by": "workspace_id|api_key_id|model|service_tier|context_window（多值）",
+            "models": "多值", "workspace_ids": "多值", "limit": "≤1000", "page": "cursor"
+          },
+          "responseShape": "{ data:[{ starting_at, ending_at, results:[{ model, workspace_id, api_key_id, service_tier, uncached_input_tokens, output_tokens, cache_read_input_tokens, cache_creation_5m_input_tokens, cache_creation_1h_input_tokens, server_tool_use }] }], has_more, next_page }"
+        },
+        {
+          "kind": "cost",
+          "method": "GET",
+          "url": "https://api.anthropic.com/v1/organizations/cost_report",
+          "headers": { "x-api-key": "{ADMIN_KEY}", "anthropic-version": "2023-06-01" },
+          "query": { "starting_at": "RFC3339，必填", "group_by": "workspace_id|description", "limit": "int", "page": "cursor" },
+          "responseShape": "{ data:[{ starting_at, ending_at, results:[{ amount(字符串美元), currency, cost_type, description, model, workspace_id, service_tier }] }], has_more, next_page }",
+          "warnings": ["bucket_width 仅支持 1d"]
+        },
+        {
+          "kind": "subscription_usage_oauth",
+          "method": "GET",
+          "url": "https://api.anthropic.com/api/oauth/usage",
+          "headers": { "Authorization": "Bearer {CLAUDE_CODE_OAUTH_TOKEN}", "anthropic-beta": "oauth-2025-04-20" },
+          "responseShape": "{ five_hour:{utilization,resets_at}, seven_day:{...}, seven_day_sonnet:{...}, ... }",
+          "warnings": ["仅 Claude Pro/Max 订阅", "需 user:profile scope", "非 API key 方案"]
+        }
+      ],
+      "consoleUrl": "https://console.anthropic.com/",
+      "sources": [
+        "https://platform.claude.com/docs/en/manage-claude/usage-cost-api",
+        "https://platform.claude.com/docs/en/api/admin/usage_report/retrieve_messages",
+        "https://github.com/steipete/CodexBar/blob/main/docs/claude.md"
+      ]
+    },
+    {
+      "id": "gemini",
+      "support": "no",
+      "credentialType": null,
+      "reason": "AI Studio API key 无任何配额/用量/余额查询 HTTP 接口；官方文档无此 API，响应无 rate-limit 头，社区仅能靠 429 反推。",
+      "greyArea": {
+        "comment": "Gemini CLI 私有 OAuth 接口，非 API key 方案，且 Google 已对个人账号关闭",
+        "endpoints": [
+          { "method": "POST", "url": "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota", "body": "{ project }", "responseShape": "buckets[].{modelId, remainingFraction, resetTime}" },
+          { "method": "POST", "url": "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist", "body": "{ metadata:{ideType,pluginType} }", "responseShape": "{ paidTier, currentTier }" }
+        ]
+      },
+      "consoleUrl": "https://aistudio.google.com/usage",
+      "sources": [
+        "https://github.com/steipete/CodexBar/blob/main/docs/gemini.md",
+        "https://discuss.ai.google.dev/t/gemini-api-429-resource-exhausted-error-on-tier-1/114413"
+      ]
+    },
+    {
+      "id": "xai",
+      "support": "yes",
+      "credentialType": "management_key",
+      "credentialHint": "xAI Management key（console.x.ai → Management Keys；xai- 前缀但与推理 key 不同），需相应 ACL；team_id 在 console Team settings 复制；baseURL 是 management-api.x.ai 不是 api.x.ai",
+      "endpoints": [
+        {
+          "kind": "balance",
+          "method": "GET",
+          "url": "https://management-api.x.ai/v1/billing/teams/{team_id}/prepaid/balance",
+          "headers": { "Authorization": "Bearer {MANAGEMENT_KEY}" },
+          "responseShape": "{ total:{val}, changes:[{ teamId, changeOrigin:PURCHASE|SPEND|REFUND|MANUAL|AUTO_PURCHASE, topupStatus, amount:{val}, createTime }] }",
+          "warnings": ["金额单位=美元美分", "符号反直觉：SPEND 为正、PURCHASE 为负；可用余额 = -total.val/100 美元"]
+        },
+        { "kind": "spending_limits", "method": "GET", "url": "https://management-api.x.ai/v1/billing/teams/{team_id}/postpaid/spending-limits", "headers": { "Authorization": "Bearer {MANAGEMENT_KEY}" } },
+        { "kind": "invoice_preview", "method": "GET", "url": "https://management-api.x.ai/v1/billing/teams/{team_id}/postpaid/invoice/preview", "headers": { "Authorization": "Bearer {MANAGEMENT_KEY}" } },
+        {
+          "kind": "usage_analytics",
+          "method": "POST",
+          "url": "https://management-api.x.ai/v1/billing/teams/{team_id}/usage",
+          "headers": { "Authorization": "Bearer {MANAGEMENT_KEY}" },
+          "body": "{ analyticsRequest:{ timeRange:{startTime,endTime,timezone}, timeUnit, values:[{name,aggregation}], groupBy:[], filters:[] } }",
+          "responseShape": "{ timeSeries:[{ group, groupLabels, dataPoints:[{timestamp, values[]}] }], limitReached }"
+        },
+        { "kind": "model_rate_limits", "method": "GET", "url": "https://management-api.x.ai/auth/teams/{teamId}/models", "headers": { "Authorization": "Bearer {MANAGEMENT_KEY}" } },
+        { "kind": "key_validation", "method": "GET", "url": "https://management-api.x.ai/auth/management-keys/validation", "headers": { "Authorization": "Bearer {MANAGEMENT_KEY}" } }
+      ],
+      "consoleUrl": "https://console.x.ai/team/default/billing",
+      "sources": [
+        "https://docs.x.ai/developers/rest-api-reference/management",
+        "https://docs.x.ai/developers/rest-api-reference/management/billing",
+        "https://docs.x.ai/console/billing"
+      ]
+    },
+    {
+      "id": "mistral",
+      "support": "no",
+      "credentialType": null,
+      "reason": "无任何公开余额/用量查询接口；官方文档无 billing API，开源余额工具均标注 Console only。",
+      "consoleUrl": "https://console.mistral.ai/usage",
+      "sources": [
+        "https://github.com/hanmumuHL/check_balance",
+        "https://theneuralbase.com/mistral-api/learn/advanced/la-plateforme-dashboard-overview/"
+      ]
+    }
+  ]
+}

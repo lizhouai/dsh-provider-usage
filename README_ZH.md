@@ -15,10 +15,23 @@
 ## 功能
 
 - **自动探测** —— 自动枚举当前 profile 中已注册的 provider 路由（`ctx.llm`），常见路由零配置。
-- **按 provider 类型查询额度**：
-  - **DeepSeek**（`deepseek-official` 等）→ `GET {baseURL}/user/balance`（余额，含赠送/充值明细）
-  - **Kimi Code 订阅**（`kimi-coding`）→ `GET {baseURL}/v1/usages`（每周配额及各限速窗口，含重置倒计时）
-  - **Moonshot 开放平台**（`moonshotai-cn` / `moonshotai`）→ `GET {baseURL}/users/me/balance`
+- **按 provider 类型查询额度** —— 没有公开余额/配额接口的路由（Google、Mistral、Groq、Bedrock、Azure、Qwen Token Plan 等）会在面板中标注为「不支持」，而不是被静默忽略：
+
+  | kind | 路由 | 查询接口 | 展示内容 |
+  |---|---|---|---|
+  | `deepseek` | `deepseek-official`、`deepseek` | `GET {baseURL}/user/balance` | 余额（含赠送/充值明细） |
+  | `moonshot` | `moonshotai-cn`、`moonshotai` | `GET {baseURL}/users/me/balance` | 可用/代金券/现金余额 |
+  | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | 每周配额及各限速窗口，含重置倒计时 |
+  | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credit 已用/总额 |
+  | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | 付费档配额快照 / 免费档月度配额 |
+  | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT 订阅 5h/周窗口 + credits |
+  | `openai` | `openai` | `GET {origin}/v1/organization/costs` | 当月花费（**需 Admin key**，普通 key 会 403） |
+  | `anthropic` | `anthropic` | `GET {baseURL}/v1/organizations/cost_report` | 当月花费（**需 Admin key**，`x-api-key` 头） |
+  | `minimax` | `minimax`、`minimax-cn` | `GET {origin}/v1/api/openplatform/coding_plan/remains` | Coding Plan 5h/周剩余百分比 |
+  | `zai` | `zai`、`zai-coding-cn` | `GET {origin}/api/monitor/usage/quota/limit` | GLM Coding Plan 窗口（`Authorization` 直接放 key，无 Bearer） |
+  | `opencode` | `opencode`、`opencode-go` | `GET {baseURL}/usage` | Zen Go 滚动/周/月窗口 |
+  | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | 团队 credit 余额 |
+  | `xai` | `xai` | `GET {baseURL}/billing/credits` | 预付余额（USD） |
 - **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。
 - **悬浮球入口** —— 可任意拖动的悬浮球点击弹出用量面板，位置持久化；默认停靠在主对话区域左下角（左边距 = 底边距），面板头部的归位按钮一键回到默认位置；球体光晕表达健康度：绿色全部正常、黄色有配额剩余不足 30%、红色查询失败/缺密钥/用量 ≥90%。
 - **版本徽章** —— 面板标题旁显示当前运行的插件版本，一眼确认加载的是哪个发布版。
@@ -83,7 +96,7 @@ dsh plugin --profile web add dsh-provider-usage@latest
 | --- | --- | --- | --- |
 | `refreshSeconds` | number | `60` | 面板建议刷新周期（秒），5–86400 |
 | `autoDetect` | boolean | `true` | 从 llm 注册表自动枚举 provider |
-| `providers` | array | `[]` | 手动 provider 规格：`{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`，`kind ∈ deepseek / kimi-coding / moonshot` |
+| `providers` | array | `[]` | 手动 provider 规格：`{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`，`kind` 取上表中的任一适配器 |
 
 也可以在 `~/.dsh/settings.yaml` 中通过 `provider-usage:` 命名空间热更新同样字段。
 
