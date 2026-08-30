@@ -29,7 +29,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 
 export const name = 'provider-usage'
@@ -38,7 +37,8 @@ export const name = 'provider-usage'
     fallback only fires if the sources are compiled some other way). */
 export const version: string = typeof __PLUGIN_VERSION__ === 'undefined' ? '0.0.0-dev' : __PLUGIN_VERSION__
 
-const NS = settingsNamespace('provider-usage')
+/** Settings namespace this plugin owns (registered through `ctx.settings`). */
+const NS = 'provider-usage'
 
 /* ------------------------------------------------------------------ *
  * Wire views (mirrored by the client bundle)
@@ -884,11 +884,17 @@ markRemoteMethod(UsageService.prototype, 'list', 'list')
 
 export function apply(ctx: Context, config: ProviderUsageConfig) {
   let current = () => config
-  installSettingsSection(ctx, NS, Config, config, {
-    setSource: (source) => {
-      current = source as () => ProviderUsageConfig
-    },
-    onChange: () => {},
+  // Register the `provider-usage` settings namespace through the settings
+  // service (dsh ≥ 0.1.2: SettingsProvider.installSection replaces the old
+  // installSettingsSection helper). The source thunk feeds the live config
+  // below, so a `provider-usage:` section in settings.yaml hot-updates it.
+  ctx.inject(['settings'], (settingsCtx: any) => {
+    settingsCtx.settings.installSection(ctx, NS, Config, config, {
+      setSource: (source: () => ProviderUsageConfig) => {
+        current = source
+      },
+      onChange: () => {},
+    })
   })
   // Constructing the service registers `ctx.usage` and the `usage/*` wire namespace.
   new UsageService(ctx, () => current())

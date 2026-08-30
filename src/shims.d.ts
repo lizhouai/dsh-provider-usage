@@ -44,15 +44,37 @@ declare module '@deepseek-ai/dsh-launch-environment' {
 }
 
 declare module '@deepseek-ai/dsh-settings' {
-  import type { Context } from '@deepseek-ai/cordis'
-  export function settingsNamespace(name: string): string
-  export function installSettingsSection(
-    ctx: Context,
-    ns: string,
-    schema: unknown,
-    entry: unknown,
-    hooks: { setSource?: (source: () => unknown) => void; onChange?: () => void },
-  ): void
+  /** A lowercase hyphenated settings namespace identifier. */
+  export type SettingsNamespace = string
+  /** Owner-facing handle for one registered namespace. */
+  export interface SettingsScope<T> {
+    get(): T
+    watch(callback: (next: T, prev: T) => void | Promise<void>): () => void
+    update(patch: object): Promise<void>
+    replace(section: object): Promise<void>
+  }
+  /** Hooks a consumer hands to `SettingsProvider.installSection`. */
+  export interface SettingsSectionHooks<T> {
+    setSource(current: () => T): void
+    onChange(): void
+    validate?(value: T): void
+  }
+  /** The settings service (`ctx.settings`); registration + resolution. */
+  export class SettingsProvider {
+    register<T>(ns: string, schema: unknown, options?: { base?: Partial<T>; applies?: 'live' | 'restart' }): SettingsScope<T>
+    installSection<T>(owner: unknown, ns: string, schema: unknown, entry: T, hooks: SettingsSectionHooks<T>): void
+    describe(options?: { redactSecrets?: boolean }): unknown[]
+    get<T = unknown>(ns: string): T
+    update(ns: string, patch: object, expectedRevision?: number): Promise<void>
+    replace(ns: string, section: object, expectedRevision?: number): Promise<void>
+    mutate(ns: string, ops: readonly unknown[], expectedRevision?: number): Promise<void>
+  }
+  export class SettingsConflictError extends Error {
+    readonly code: 'SETTINGS_CONFLICT'
+    readonly expected: number
+    readonly actual: number
+  }
+  export function redactSecrets(value: unknown): unknown
 }
 
 /** Own package version, injected by tsdown `define` at build time. */
