@@ -112,7 +112,7 @@ pnpm pack   # produces dsh-provider-usage-<version>.tgz
 dsh plugin --profile web add ./dsh-provider-usage-<version>.tgz
 ```
 
-Install the **tarball**, not the repo directory: `dsh plugin add .` links the repo, whose own `node_modules` then shadows the harness's shared `@deepseek-ai/cordis` instance and the host half never registers (RPC 404). The link form is still handy for client-only UI iteration — the browser bundle is self-contained, so a rebuild + page refresh picks it up — but switch to the tarball (or the npm release) whenever you need the host half. If pnpm fails with `EPERM ... symlink` while replacing a linked install, delete the stale `node_modules/dsh-provider-usage` junction in the profile directory and retry.
+Install the **tarball**, not the repo directory: `dsh plugin --profile web add .` links the repo, whose own `node_modules` then shadows the harness's shared `@deepseek-ai/cordis` instance and the host half never registers (RPC 404). The link form is still handy for client-only UI iteration — the browser bundle is self-contained, so a rebuild + page refresh picks it up — but switch to the tarball (or the npm release) whenever you need the host half. If pnpm fails with `EPERM ... symlink` while replacing a linked install, delete the stale `node_modules/dsh-provider-usage` junction in the profile directory and retry.
 
 Restart `dsh web` after changing the plugin set (a plugin add/remove requires a restart; afterwards, code changes only need a rebuild + re-add + page refresh).
 
@@ -122,7 +122,7 @@ Restart `dsh web` after changing the plugin set (a plugin add/remove requires a 
 dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
-Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-usage@0.3.1`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
+Then restart `dsh web` and refresh the page. If the release you want was published very recently, your profile's supply-chain cooldown (`minimumReleaseAge`) may silently keep the older version — pin the exact version instead (`dsh plugin --profile web add dsh-provider-usage@0.3.10`) and dsh will exempt it automatically. The version badge in the panel header confirms which release is actually loaded.
 
 ## Configuration
 
@@ -163,7 +163,7 @@ config:
 
 ## How it works
 
-- **Host half** (`src/index.ts`): `UsageService extends TypertRemoteService` exposes `usage/list` via `@Remote('list')` (SRC mode, no codegen). Config is declared with schemastery, and `installSettingsSection` enables hot updates from settings.
+- **Host half** (`src/index.ts`): `UsageService extends TypertRemoteService` exposes `usage/list` via the `Remote('list')` marker, applied without decorator syntax (SRC mode, no codegen). Config is declared with schemastery, and the settings provider's `installSection` enables hot updates from the settings document.
 - **Client half** (`src/client/`): a `window.__ModuleLoader__.load({id, factory})` bundle (built by tsdown) mounts through the `sidebar.footer.action` slot (used purely as a mount point — the trigger itself is a floating ball portaled to `document.body`) and polls `usage/list` through `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` on its own interval. The service stays stateless — every poll fetches live values.
 
 ## License

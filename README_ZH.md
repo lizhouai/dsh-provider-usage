@@ -112,7 +112,7 @@ pnpm pack   # 产出 dsh-provider-usage-<version>.tgz
 dsh plugin --profile web add ./dsh-provider-usage-<version>.tgz
 ```
 
-注意要安装 **tarball** 而不是仓库目录：`dsh plugin add .` 会链接整个仓库，仓库自带 `node_modules` 里的 `@deepseek-ai/cordis` 会遮蔽 harness 的共享实例，导致 host 半注册不上（RPC 404）。link 方式仍适合纯 UI 迭代（浏览器 bundle 自包含，重新 build + 刷新页面即生效），但需要 host 半时请切换到 tarball 或 npm 正式版。若替换 link 安装时 pnpm 报 `EPERM ... symlink`，手动删除 profile 目录下残留的 `node_modules/dsh-provider-usage` 联结后重试即可。
+注意要安装 **tarball** 而不是仓库目录：`dsh plugin --profile web add .` 会链接整个仓库，仓库自带 `node_modules` 里的 `@deepseek-ai/cordis` 会遮蔽 harness 的共享实例，导致 host 半注册不上（RPC 404）。link 方式仍适合纯 UI 迭代（浏览器 bundle 自包含，重新 build + 刷新页面即生效），但需要 host 半时请切换到 tarball 或 npm 正式版。若替换 link 安装时 pnpm 报 `EPERM ... symlink`，手动删除 profile 目录下残留的 `node_modules/dsh-provider-usage` 联结后重试即可。
 
 插件集合变化后需重启 `dsh web`；之后仅改动代码时重新 build + 重新 add + 刷新页面即可。
 
@@ -122,7 +122,7 @@ dsh plugin --profile web add ./dsh-provider-usage-<version>.tgz
 dsh plugin --profile web add dsh-provider-usage@latest
 ```
 
-然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-usage@0.3.1`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
+然后重启 `dsh web` 并刷新页面。如果目标版本刚发布不久，profile 的供应链冷静期（`minimumReleaseAge`）可能会静默停留在旧版——这时指定精确版本号（如 `dsh plugin --profile web add dsh-provider-usage@0.3.10`），dsh 会自动豁免该版本。面板标题旁的版本徽章可以确认实际加载的版本。
 
 ## 配置说明
 
@@ -163,7 +163,7 @@ config:
 
 ## 架构
 
-- **Host 半**（`src/index.ts`）：`UsageService extends TypertRemoteService`，`@Remote('list')` 暴露 `usage/list`（SRC 模式，无需代码生成）；`Config` 用 schemastery 声明，`installSettingsSection` 支持 settings 热更新。
+- **Host 半**（`src/index.ts`）：`UsageService extends TypertRemoteService`，通过 `Remote('list')` 标记（以非装饰器方式应用）暴露 `usage/list`（SRC 模式，无需代码生成）；`Config` 用 schemastery 声明，通过 settings provider 的 `installSection` 支持 settings 热更新。
 - **Client 半**（`src/client/`）：`window.__ModuleLoader__.load({id, factory})` 格式 bundle（tsdown 构建），通过 `sidebar.footer.action` slot 挂载（仅作为挂载点——触发器本体是 portal 到 `document.body` 的悬浮球），通过 `ctx.connection.rpc.call('/api', 'usage/list', {args:{}})` 轮询。服务本身无状态——每次轮询都取实时值。
 
 ## 许可证
