@@ -80,13 +80,14 @@ Authorization: Bearer <旧式 user key>
 
 ## 2. openai-codex — yes（ChatGPT 订阅 OAuth，非 API key）
 
-凭证：`~/.codex/auth.json`（或 `$CODEX_HOME/auth.json`）中的 OAuth access token。baseURL：`https://chatgpt.com/backend-api`。
+凭证：OAuth access token。在 dsh 中由 `llm-pi-ai/openai-codex` 授权记录提供（`~/.dsh/.credentials.yaml` 的 `kind: grant`，字段 `type/access/refresh/expires/accountId`）；CLI 场景则是 `~/.codex/auth.json`。baseURL：`https://chatgpt.com/backend-api`。
 
 ### 2.1 用量窗口
 
 ```
 GET https://chatgpt.com/backend-api/wham/usage
 Authorization: Bearer <oauth access_token>
+ChatGPT-Account-Id: <chatgpt account/workspace id>   # 从 access token 的 JWT claim https://api.openai.com/auth.chatgpt_account_id 解析
 ```
 
 ```json
@@ -98,12 +99,15 @@ Authorization: Bearer <oauth access_token>
     "primary_window":   { "used_percent": 23, "limit_window_seconds": 18000,  "reset_after_seconds": 3600, "reset_at": 1730000000 },
     "secondary_window": { "used_percent": 5,  "limit_window_seconds": 604800, "reset_after_seconds": 86400, "reset_at": 1730500000 }
   },
-  "additional_rate_limits": [ { "...": "模型专属窗口，如 Codex-Spark" } ],
-  "credits": { "has_credits": true, "unlimited": false, "balance": "12.34" }
+  "additional_rate_limits": [ { "limit_name": "codex", "metered_feature": "codex", "rate_limit": { "...": "模型专属窗口，如 Codex-Spark" } } ],
+  "credits": { "has_credits": true, "unlimited": false, "balance": "12.34" },
+  "spend_control": { "reached": false, "individual_limit": { "limit": "100", "used": "40", "remaining": "60", "used_percent": 40, "reset_at": 1730000000 } }
 }
 ```
 
 - `primary_window` = 5 小时会话窗口；`secondary_window` = 周窗口。
+- `credits.balance`、`spend_control.individual_limit` 的 `limit/used/remaining` 都是**十进制字符串**，不是数字。
+- 401 时刷新一次 OAuth 并重试（本插件已实现：从凭据库读 grant → 临近过期自动 refresh → `Bearer` + `ChatGPT-Account-Id` 请求 → 401 重试一次）。
 
 ### 2.2 重置积分（可选）
 
@@ -114,9 +118,9 @@ Authorization: Bearer <oauth access_token>
 
 ### 注意事项
 - **未公开内部接口**，无官方文档，可能随时变更/加 Cloudflare 校验。
-- token 会过期：不要自己写刷新发布逻辑覆盖 auth.json；stale 时引导用户运行一次 codex CLI 恢复，或走本地 `codex app-server` JSON-RPC（`account/read`、`account/rateLimits/read`）拿同一数据。
+- token 会过期：本插件读取 dsh 凭据库中的 grant 并在临近过期（30s 内）时用 `client_id=app_EMoamEEZ73f0CkXaXp7hrann` 刷新一次，把旋转后的 grant 通过凭据库的 `modifyRecord` 写回（带跨进程锁，不会与 LLM 请求的刷新互相覆盖）。
 - 网页兜底：`https://chatgpt.com/codex/settings/usage`（需 cookie，不推荐）。
-- 来源：https://github.com/steipete/CodexBar/blob/main/docs/codex.md
+- 来源：https://github.com/openai/codex （`backend-client/src/client/rate_limit_resets.rs`、`model-provider/src/bearer_auth_provider.rs`）；https://github.com/steipete/CodexBar/blob/main/docs/codex.md
 
 ---
 

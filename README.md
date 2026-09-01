@@ -24,7 +24,7 @@
   | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | weekly quota + rate-limit windows, reset countdown |
   | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credits used / total |
   | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | plan quota snapshots (paid) or monthly quotas (free) |
-  | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT subscription 5h / weekly windows + credits |
+  | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT subscription 5h / weekly windows + credits + spend control (**OAuth login**, not an API key — see [OpenAI Codex via OAuth](#openai-codex-via-oauth)) |
   | `openai` | `openai` | `GET {origin}/v1/organization/costs` | current-month spend (**admin key required**; a regular key fails with 403) |
   | `anthropic` | `anthropic` | `GET {baseURL}/v1/organizations/cost_report` | current-month spend (**admin key required**, `x-api-key` auth) |
   | `minimax` | `minimax`, `minimax-cn` | `GET {origin}/v1/api/openplatform/coding_plan/remains` | Coding Plan 5h / weekly remaining % |
@@ -32,7 +32,7 @@
   | `opencode` | `opencode`, `opencode-go` | `GET {baseURL}/usage` | Zen Go rolling / weekly / monthly windows |
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | team credit balance |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | prepaid balance (USD) |
-- **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk.
+- **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk. For OAuth providers (OpenAI Codex) the plugin reads the grant record the sign-in flow stored, and refreshes it transparently when it is about to expire.
 - **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The halo around the ball encodes the health of the provider **in use** (the composer's current model selection): green all good, amber some quota below 30% left, red on query failure / missing key / usage ≥90%. Idle providers with low quota do not color the ball — switch to another provider with enough quota and the ball turns green again; the panel marks the in-use provider and still lists every provider's numbers.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
 - **Bilingual panel** — built-in Chinese/English UI; follows the harness language by default, with a one-click toggle in the panel header (persisted in localStorage).
@@ -44,6 +44,48 @@
 The floating ball (bottom-left, with the green healthy halo) and the open usage panel:
 
 ![Usage panel in English](docs/panel-en.png)
+
+## OpenAI Codex via OAuth
+
+OpenAI Codex is a **ChatGPT-subscription** provider: it authenticates with an OAuth access token, not an API key, so there is nothing to paste into a key field. dsh itself has no OAuth *button* for this route — but this plugin can still query its quota, because it reads the OAuth grant out of the harness credential store. Set the provider up once, and the usage panel shows your real 5-hour / weekly Codex windows.
+
+### 1. Make sure the route exists
+
+The sign-in writes a grant record addressed `llm-pi-ai/openai-codex`, and the route has to be configured for `ctx.llm` to list it. With the stock `llm-pi-ai` adapter mounted (default in the web profile), an empty profile is enough — e.g. in `~/.dsh/settings.yaml`:
+
+```yaml
+llm-pi-ai:
+  providers:
+    openai-codex: {}
+```
+
+### 2. Sign in through the harness authorization seam
+
+`dsh-llm-pi-ai` registers an "OpenAI (ChatGPT Plus/Pro)" OAuth flow for `openai-codex` on the harness authorization seam (`ctx.authorization`, credential key `llm-pi-ai/openai-codex`). Complete it from any surface that runs that flow — a sign-in entry on the harness model/authorization UI, or any pi-ai client whose login persists through the harness credential store. Finish the browser (or device-code) flow with your ChatGPT account. The harness then stores the grant under `~/.dsh/.credentials.yaml` as `llm-pi-ai/openai-codex`:
+
+```yaml
+records:
+  llm-pi-ai/openai-codex:
+    kind: grant
+    payload:
+      type: oauth
+      access: <access token>
+      refresh: <refresh token>
+      expires: <epoch ms>
+      accountId: <chatgpt account id>
+```
+
+> The grant must land in the harness credential store (the record above). Codex clients that keep their own credential file (e.g. `dsh-codex`'s `$DSH_HOME/.openai-codex-auth.json`, or the Codex CLI's `~/.codex/auth.json`) do not write this record, so this plugin cannot see them.
+
+### 3. Watch the quota
+
+That's it. The route is auto-detected (`ctx.llm` lists `openai-codex`), and the plugin:
+
+1. reads the grant record from the credential store on every poll (no caching),
+2. refreshes the OAuth token automatically when it is within 30 s of expiry (and persists the rotated grant back through the store's locked `modifyRecord`),
+3. calls `GET https://chatgpt.com/backend-api/wham/usage` with `Authorization: Bearer <access>` and the `ChatGPT-Account-Id` header derived from the token's own JWT claim, retrying once after a refresh if the endpoint answers `401`.
+
+The panel then shows your subscription's **5h limit**, **weekly** windows (used %, reset countdown) plus **credits** and **spend control** balances when the plan reports them. If the grant is missing the card reads "OAuth authorization missing (llm-pi-ai/openai-codex)" — sign in again with step 2.
 
 ## Install
 

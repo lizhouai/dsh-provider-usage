@@ -12,7 +12,10 @@
  * - `moonshot`       → GET {baseURL}/users/me/balance          (开放平台余额)
  * - `openrouter`     → GET {origin}/api/v1/credits             (credit 总额与已用量)
  * - `github-copilot` → GET api.github.com/copilot_internal/user (订阅配额快照, OAuth token)
- * - `openai-codex`   → GET {baseURL}/wham/usage                (ChatGPT 订阅 5h/weekly 窗口)
+ * - `openai-codex`   → GET {baseURL}/wham/usage                (ChatGPT 订阅 5h/weekly 窗口 + credits)
+ *                     OAuth access token (no API key): reads the `llm-pi-ai/openai-codex`
+ *                     grant record from the credentials service, refreshes it near expiry,
+ *                     and sends `ChatGPT-Account-Id` derived from the token JWT.
  * - `openai`         → GET {origin}/v1/organization/costs      (Admin key, 当月花费)
  * - `anthropic`      → GET {baseURL}/v1/organizations/cost_report (Admin key, 当月花费)
  * - `minimax`        → GET {origin}/v1/api/openplatform/coding_plan/remains (Coding Plan 5h/weekly)
@@ -27,9 +30,16 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import {
+  openAiCodexAccountId,
+  openAiCodexGrantNeedsRefresh,
+  parseOpenAiCodexGrant,
+  refreshOpenAiCodexGrant,
+  type OpenAiCodexGrant,
+} from './openai-codex'
 
 export const name = 'provider-usage'
 
@@ -66,7 +76,7 @@ export interface ProviderUsageView {
   id: string
   displayName: string
   kind: 'balance' | 'usage' | null
-  status: 'ok' | 'error' | 'missing-credential' | 'unsupported'
+  status: 'ok' | 'error' | 'missing-credential' | 'missing-authorization' | 'unsupported'
   message: string | null
   balances: BalanceRow[] | null
   usages: UsageRow[] | null
@@ -112,6 +122,9 @@ interface AdapterPayload {
   usages: UsageRow[] | null
 }
 
+/** Re-resolve the OAuth credential (refresh + persist) after a 401. */
+type RefreshFn = (signal: AbortSignal) => Promise<string>
+
 interface QuotaAdapter {
   /** Panel data shape this adapter produces. */
   view: 'balance' | 'usage'
@@ -119,7 +132,7 @@ interface QuotaAdapter {
   match: RegExp
   /** Extra request headers beyond Authorization/Accept. */
   headers?: Record<string, string>
-  fetch(baseURL: string, apiKey: string, signal: AbortSignal): Promise<AdapterPayload>
+  fetch(baseURL: string, apiKey: string, signal: AbortSignal, refresh?: RefreshFn): Promise<AdapterPayload>
 }
 
 /* ------------------------------------------------------------------ *
@@ -163,8 +176,18 @@ interface ResolvedProvider {
   displayName: string
   kind: ProviderKind
   baseURL: string
-  apiKeyEnv: string
+  /** Undefined only for OAuth-record providers such as OpenAI Codex. */
+  apiKeyEnv?: string
 }
+
+/**
+ * Credential record union as written by the harness credential service at
+ * runtime (dsh ≥ 0.1.2; the locally pinned rc.6 typings predate the record
+ * half of the seam). Declared here so the Codex OAuth read stays typed.
+ */
+type CredentialRecord =
+  | { readonly kind: 'api-key'; readonly key?: string; readonly env?: Readonly<Record<string, string>> }
+  | { readonly kind: 'grant'; readonly payload: unknown }
 
 /** A live route whose endpoint has no quota adapter. */
 interface UnsupportedRoute {
@@ -280,6 +303,17 @@ function usageRow(raw: any, fallbackLabel: string): UsageRow | null {
   }
 }
 
+/**
+ * Display priority for quota windows: the rolling 5h window comes first,
+ * then the weekly window, then provider-ordered extras (stable sort).
+ * Every adapter with a 5h/weekly pair (Kimi, Codex, MiniMax, z.ai,
+ * OpenCode) renders in this order.
+ */
+function orderUsageRows(rows: UsageRow[]): UsageRow[] {
+  const priority = (label: string) => (label === '5h limit' ? 0 : label === 'weekly' ? 1 : 2)
+  return rows.sort((a, b) => priority(a.label) - priority(b.label))
+}
+
 /** Parse the Kimi Code `/v1/usages` payload (both observed shapes). */
 function parseKimiUsages(payload: any): UsageRow[] {
   const rows: UsageRow[] = []
@@ -290,7 +324,7 @@ function parseKimiUsages(payload: any): UsageRow[] {
       const row = usageRow(item, isOverall ? 'weekly' : 'limit')
       if (row) rows.push(isOverall ? { ...row, label: 'weekly' } : row)
     }
-    return rows
+    return orderUsageRows(rows)
   }
   const usage = usageRow(payload?.usage, 'weekly')
   if (usage) rows.push({ ...usage, label: 'weekly' })
@@ -313,7 +347,7 @@ function parseKimiUsages(payload: any): UsageRow[] {
       if (row) rows.push(row)
     }
   }
-  return rows
+  return orderUsageRows(rows)
 }
 
 /* ------------------------------------------------------------------ *
@@ -494,9 +528,28 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
   'openai-codex': {
     view: 'usage',
     match: /chatgpt\.com\/backend-api/i,
-    async fetch(baseURL, apiKey, signal) {
-      // ChatGPT subscription side endpoint (OAuth access token, not an API key).
-      const body = await fetchJson(`${root(baseURL)}/wham/usage`, apiKey, signal)
+    headers: { originator: 'pi', 'user-agent': `dsh-provider-usage/${version}` },
+    async fetch(baseURL, apiKey, signal, refresh) {
+      // ChatGPT subscription endpoint. Codex OAuth calls require both the
+      // bearer access token and the account id embedded in that token. A 401
+      // (rotated token) triggers one refresh + retry, exactly like the CLI.
+      const headers = (token: string) => {
+        const accountId = openAiCodexAccountId(token)
+        if (accountId === null) throw new Error('OpenAI Codex OAuth token has no ChatGPT account id')
+        return { 'chatgpt-account-id': accountId, ...this.headers }
+      }
+      const attempt = async (token: string) => {
+        const body = await fetchJson(`${root(baseURL)}/wham/usage`, token, signal, headers(token))
+        return body
+      }
+      let body: any
+      try {
+        body = await attempt(apiKey)
+      } catch (error) {
+        const status = error instanceof Error ? Number(/^HTTP (\d+)/.exec(error.message)?.[1] ?? NaN) : NaN
+        if (!(status === 401 && refresh !== undefined)) throw error
+        body = await attempt(await refresh(signal))
+      }
       const rows: UsageRow[] = []
       const windowRow = (label: string, win: any) => {
         if (win === null || typeof win !== 'object') return
@@ -512,11 +565,30 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
           windowRow(String(item?.limit_name ?? item?.metered_feature ?? 'limit'), item?.rate_limit?.primary_window)
         }
       }
-      const credits = toNumber(body?.credits?.balance)
-      if (credits !== null) {
-        rows.push({ label: 'credits', used: null, limit: null, remaining: credits, percent: null, resetAt: null })
+      const credits = body?.credits
+      if (credits !== null && typeof credits === 'object') {
+        const balance = toNumber(credits.balance)
+        if (balance !== null) {
+          rows.push({ label: 'credits', used: null, limit: null, remaining: balance, percent: null, resetAt: null })
+        }
       }
-      return { balances: null, usages: rows }
+      const spend = body?.spend_control?.individual_limit
+      if (spend !== null && typeof spend === 'object') {
+        const spendLimit = toNumber(spend.limit)
+        const spendUsed = toNumber(spend.used)
+        const spendRemaining = toNumber(spend.remaining)
+        if (spendLimit !== null || spendUsed !== null || spendRemaining !== null) {
+          rows.push({
+            label: 'spend control',
+            used: spendUsed,
+            limit: spendLimit,
+            remaining: spendRemaining,
+            percent: spendLimit !== null && spendLimit > 0 && spendUsed !== null ? (spendUsed / spendLimit) * 100 : null,
+            resetAt: toResetAt(spend.reset_at),
+          })
+        }
+      }
+      return { balances: null, usages: orderUsageRows(rows) }
     },
   },
 
@@ -622,7 +694,7 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
           }
         }
       }
-      return { balances: null, usages: rows }
+      return { balances: null, usages: orderUsageRows(rows) }
     },
   },
 
@@ -663,7 +735,7 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
           resetAt: toResetAt(item?.nextResetTime),
         })
       })
-      return { balances: null, usages: rows }
+      return { balances: null, usages: orderUsageRows(rows) }
     },
   },
 
@@ -688,7 +760,7 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
         if (percent === null) continue
         rows.push({ label, used: percent, limit: 100, remaining: 100 - percent, percent, resetAt: toResetAt(win.resetsAt ?? win.resets_at) })
       }
-      return { balances: null, usages: rows }
+      return { balances: null, usages: orderUsageRows(rows) }
     },
   },
 
@@ -831,8 +903,14 @@ export class UsageService extends TypertRemoteService {
     }
     if (baseURL !== undefined) {
       const kind = kindOfBaseURL(baseURL)
-      if (kind !== null && apiKeyEnv !== undefined) {
-        return { id: route.id, displayName: route.name || known?.displayName || route.id, kind, baseURL, apiKeyEnv }
+      if (kind !== null && (apiKeyEnv !== undefined || kind === 'openai-codex')) {
+        return {
+          id: route.id,
+          displayName: route.name || known?.displayName || route.id,
+          kind,
+          baseURL,
+          ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
+        }
       }
     }
     return { unsupported: true, route }
@@ -850,6 +928,30 @@ export class UsageService extends TypertRemoteService {
     return undefined
   }
 
+  /** Resolve the Codex OAuth grant from the harness credential records,
+      refreshing it when close to expiry (and persisting the rotated grant). */
+  private async resolveOpenAiCodexGrant(signal: AbortSignal): Promise<OpenAiCodexGrant | undefined> {
+    const credentials = this.ctx.get('credentials') as
+      | {
+          readRecord(key: string): Promise<CredentialRecord | undefined>
+          modifyRecord(key: string, mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>): Promise<CredentialRecord | undefined>
+        }
+      | undefined
+    if (credentials === undefined) return undefined
+    const record = await credentials.readRecord(credentialKey('llm-pi-ai', 'openai-codex'))
+    if (record === undefined) return undefined
+    const current = record.kind === 'grant' ? parseOpenAiCodexGrant(record.payload) : null
+    if (current === null) return undefined
+    if (!openAiCodexGrantNeedsRefresh(current)) return current
+    const refreshed = await refreshOpenAiCodexGrant(current.refresh, signal)
+    await credentials
+      .modifyRecord(credentialKey('llm-pi-ai', 'openai-codex'), async (existing: CredentialRecord | undefined) =>
+        existing === undefined ? existing : { kind: 'grant', payload: refreshed },
+      )
+      .catch(() => {})
+    return refreshed
+  }
+
   private async fetchProvider(spec: DetectedProvider, activeProviderId: string | null, outerSignal?: AbortSignal): Promise<ProviderUsageView> {
     if ('unsupported' in spec) {
       return failView(spec.route.id, spec.route.name || spec.route.id, null, 'unsupported', spec.route.id, spec.route.id === activeProviderId)
@@ -857,13 +959,29 @@ export class UsageService extends TypertRemoteService {
     const active = spec.id === activeProviderId
     const adapter = ADAPTERS[spec.kind]
     const base = { id: spec.id, displayName: spec.displayName, kind: adapter.view, balances: null, usages: null, active }
-    const apiKey = await this.resolveApiKey(spec.apiKeyEnv)
-    if (apiKey === undefined) {
-      return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', spec.apiKeyEnv, active)
-    }
-    const signal = AbortSignal.any([AbortSignal.timeout(15000), ...(outerSignal ? [outerSignal] : [])])
+    const signal = AbortSignal.any([AbortSignal.timeout(20000), ...(outerSignal ? [outerSignal] : [])])
     try {
-      const payload = await adapter.fetch(spec.baseURL, apiKey, signal)
+      let apiKey: string
+      let refresh: RefreshFn | undefined
+      if (spec.kind === 'openai-codex' && spec.apiKeyEnv === undefined) {
+        refresh = async (refreshSignal) => {
+          const grant = await this.resolveOpenAiCodexGrant(refreshSignal)
+          if (grant === undefined) throw new Error('OpenAI Codex OAuth authorization missing')
+          return grant.access
+        }
+        const grant = await this.resolveOpenAiCodexGrant(signal)
+        if (grant === undefined) {
+          return failView(spec.id, spec.displayName, adapter.view, 'missing-authorization', 'llm-pi-ai/openai-codex', active)
+        }
+        apiKey = grant.access
+      } else {
+        const resolved = await this.resolveApiKey(spec.apiKeyEnv!)
+        if (resolved === undefined) {
+          return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', spec.apiKeyEnv!, active)
+        }
+        apiKey = resolved
+      }
+      const payload = await adapter.fetch(spec.baseURL, apiKey, signal, refresh)
       return okView({ ...base, ...payload })
     } catch (error) {
       if (outerSignal?.aborted) throw error

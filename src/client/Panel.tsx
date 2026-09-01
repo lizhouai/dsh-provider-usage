@@ -34,7 +34,7 @@ interface ProviderUsageView {
   id: string
   displayName: string
   kind: 'balance' | 'usage' | null
-  status: 'ok' | 'error' | 'missing-credential' | 'unsupported'
+  status: 'ok' | 'error' | 'missing-credential' | 'missing-authorization' | 'unsupported'
   message: string | null
   balances: BalanceRow[] | null
   usages: UsageRow[] | null
@@ -219,7 +219,7 @@ function healthTone(data: UsageListResult | null, error: string | null): 'ok' | 
   const relevant = active.length > 0 ? active : providers
   let tone: 'ok' | 'warn' | 'danger' = 'ok'
   for (const provider of relevant) {
-    if (provider.status === 'error' || provider.status === 'missing-credential') return 'danger'
+    if (provider.status === 'error' || provider.status === 'missing-credential' || provider.status === 'missing-authorization') return 'danger'
     for (const row of provider.usages ?? []) {
       const rowTone = barTone(row.percent)
       if (rowTone === 'danger') return 'danger'
@@ -289,6 +289,8 @@ function ProviderCard({ provider, now, t }: { provider: ProviderUsageView; now: 
         <span className="dsh-usage-message">{t('status.unsupported')}</span>
       ) : provider.status === 'missing-credential' ? (
         <span className="dsh-usage-message">{t('status.missingCredential', { ref: provider.message })}</span>
+      ) : provider.status === 'missing-authorization' ? (
+        <span className="dsh-usage-message">{t('status.missingAuthorization', { key: provider.message })}</span>
       ) : provider.status === 'error' ? (
         <span className="dsh-usage-message">{t('status.error')}: {provider.message}</span>
       ) : provider.kind === 'balance' ? (

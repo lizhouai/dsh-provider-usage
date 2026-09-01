@@ -33,7 +33,18 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 
 declare module '@deepseek-ai/dsh-credentials' {
   export type CredentialRef = string & { readonly __credentialRef: unique symbol }
+  export type CredentialKey = string & { readonly __credentialKey: unique symbol }
+  export type CredentialRecord =
+    | { readonly kind: 'api-key'; readonly key?: string; readonly env?: Readonly<Record<string, string>> }
+    | { readonly kind: 'grant'; readonly payload: unknown }
   export function credentialRef(value: string): CredentialRef
+  export function credentialKey(scope: string, id: string): CredentialKey
+}
+
+declare module '@deepseek-ai/dsh-credentials/types' {
+  export type CredentialRecord =
+    | { readonly kind: 'api-key'; readonly key?: string; readonly env?: Readonly<Record<string, string>> }
+    | { readonly kind: 'grant'; readonly payload: unknown }
 }
 
 declare module '@deepseek-ai/dsh-launch-environment' {
