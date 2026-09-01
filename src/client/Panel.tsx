@@ -45,6 +45,10 @@ interface ProviderUsageView {
 interface UsageListResult {
   fetchedAt: string
   refreshSeconds: number
+  /** Deployment-suggested balance thresholds (absent on older hosts);
+      the panel may override them locally. */
+  balanceRedThreshold?: number
+  balanceYellowThreshold?: number
   /** Plugin package version (absent on older hosts). */
   version?: string
   providers: ProviderUsageView[]
@@ -68,7 +72,13 @@ const INTERVAL_OPTIONS = [15, 30, 60, 300, 900, 1800] as const
 const STORAGE_KEY = 'dsh.provider-usage.refreshSeconds'
 const LANG_KEY = 'dsh.provider-usage.lang'
 const POS_KEY = 'dsh.provider-usage.floatPos'
+const THRESHOLD_RED_KEY = 'dsh.provider-usage.balanceRedThreshold'
+const THRESHOLD_YELLOW_KEY = 'dsh.provider-usage.balanceYellowThreshold'
 const DEFAULT_INTERVAL = 60
+/** Balance thresholds fall back to these hardcoded defaults when neither the
+    host config nor a stored override provides them. */
+const DEFAULT_BALANCE_RED = 10
+const DEFAULT_BALANCE_YELLOW = 30
 
 /** Floating ball diameter in px; drag math derives from it. */
 const BALL_SIZE = 32
@@ -122,6 +132,37 @@ function readStoredInterval(): number | null {
 function storeInterval(value: number): void {
   try {
     localStorage.setItem(STORAGE_KEY, String(value))
+  } catch {
+    /* storage unavailable: keep the in-memory value only */
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Balance thresholds (panel overrides, persisted in localStorage)
+ * ------------------------------------------------------------------ */
+
+/** Parse a threshold input: a finite number ≥ 0, or null while the field is
+    empty/transiently invalid (the string is kept in state so typing never
+    fights the controlled input). */
+function parseThreshold(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  const value = Number(trimmed)
+  return Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function readStoredThreshold(key: string): string | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw !== null && parseThreshold(raw) !== null ? raw : null
+  } catch {
+    return null
+  }
+}
+
+function storeThreshold(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
   } catch {
     /* storage unavailable: keep the in-memory value only */
   }
@@ -208,11 +249,59 @@ function barTone(percent: number | null): 'ok' | 'warn' | 'danger' {
   return 'ok'
 }
 
+/** Parse a balance amount string ("12.34", "0.00") into a number. */
+function toAmount(value: string): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/**
+ * Tone for a monetary balance, compared in the balance's own currency:
+ * below the red threshold → danger, below the yellow threshold → warn,
+ * otherwise ok. The effective red threshold never exceeds the yellow one,
+ * so the zones stay ordered no matter how the panel is configured.
+ */
+function balanceTone(value: number | null, red: number, yellow: number): 'ok' | 'warn' | 'danger' {
+  if (value === null) return 'ok'
+  const effRed = Math.min(red, yellow)
+  if (value < effRed) return 'danger'
+  if (value < yellow) return 'warn'
+  return 'ok'
+}
+
+/**
+ * Tone for one usage row. Windows with a percent (5h/weekly limits) keep the
+ * percent-based tone; rows labeled 'credits' carry a remaining balance and
+ * are judged by the balance thresholds instead.
+ */
+function usageRowTone(row: UsageRow, red: number, yellow: number): 'ok' | 'warn' | 'danger' {
+  if (row.label === 'credits') return balanceTone(row.remaining, red, yellow)
+  return barTone(row.percent)
+}
+
+/** Worst balance/usage tone across one provider's balances and usage rows. */
+function providerTone(provider: ProviderUsageView, red: number, yellow: number): 'ok' | 'warn' | 'danger' {
+  let tone: 'ok' | 'warn' | 'danger' = 'ok'
+  if (provider.kind === 'balance') {
+    for (const row of provider.balances ?? []) {
+      const rowTone = balanceTone(toAmount(row.total), red, yellow)
+      if (rowTone === 'danger') return 'danger'
+      if (rowTone === 'warn') tone = 'warn'
+    }
+  }
+  for (const row of provider.usages ?? []) {
+    const rowTone = usageRowTone(row, red, yellow)
+    if (rowTone === 'danger') return 'danger'
+    if (rowTone === 'warn') tone = 'warn'
+  }
+  return tone
+}
+
 /** Worst health across the fetch + the provider IN USE: drives the trigger's
     status dot. Only the active provider (the composer's current selection)
     colors the ball, so an idle low-quota provider does not alarm; when the
     host reports no active provider, fall back to every provider. */
-function healthTone(data: UsageListResult | null, error: string | null): 'ok' | 'warn' | 'danger' {
+function healthTone(data: UsageListResult | null, error: string | null, red: number, yellow: number): 'ok' | 'warn' | 'danger' {
   if (error !== null) return 'danger'
   const providers = data?.providers ?? []
   const active = providers.filter((provider) => provider.active)
@@ -220,11 +309,9 @@ function healthTone(data: UsageListResult | null, error: string | null): 'ok' | 
   let tone: 'ok' | 'warn' | 'danger' = 'ok'
   for (const provider of relevant) {
     if (provider.status === 'error' || provider.status === 'missing-credential' || provider.status === 'missing-authorization') return 'danger'
-    for (const row of provider.usages ?? []) {
-      const rowTone = barTone(row.percent)
-      if (rowTone === 'danger') return 'danger'
-      if (rowTone === 'warn') tone = 'warn'
-    }
+    const providerToneValue = providerTone(provider, red, yellow)
+    if (providerToneValue === 'danger') return 'danger'
+    if (providerToneValue === 'warn') tone = 'warn'
   }
   return tone
 }
@@ -238,34 +325,40 @@ function formatAmount(value: number | null): string {
  * Provider card
  * ------------------------------------------------------------------ */
 
-function UsageRows({ provider, now, t }: { provider: ProviderUsageView; now: number; t: UsageActionProps['t'] }) {
+function UsageRows({ provider, now, red, yellow, t }: { provider: ProviderUsageView; now: number; red: number; yellow: number; t: UsageActionProps['t'] }) {
   const rows = provider.usages ?? []
   if (rows.length === 0) return null
   return (
     <>
       {rows.map((row, index) => {
         const percent = row.percent
+        const isCredits = row.label === 'credits'
+        // Credits rows carry a remaining balance and are judged by the amount;
+        // quota windows keep the percent-based tone.
+        const tone = isCredits ? balanceTone(row.remaining, red, yellow) : barTone(row.percent)
         const reset = row.resetAt !== null ? formatCountdown(row.resetAt, now, t) : null
         return (
           <div className="dsh-usage-row" key={`${row.label}-${index}`}>
             <div className="dsh-usage-rowHead">
               <span className="dsh-usage-rowLabel">{row.label === 'weekly' ? t('usage.weekly') : row.label}</span>
-              <span className="dsh-usage-rowValue">
-                {row.limit === null
-                  ? row.used !== null
-                    ? t('usage.used', { used: formatAmount(row.used) })
-                    : row.remaining !== null
-                      ? formatAmount(row.remaining)
-                      : t('usage.unlimited')
-                  : percent !== null
-                    ? `${Math.round(percent)}%`
-                    : t('usage.used', { used: formatAmount(row.used) })}
+              <span className={`dsh-usage-rowValue${tone === 'ok' ? '' : ` dsh-usage-rowValue--${tone}`}`}>
+                {isCredits && row.remaining !== null
+                  ? formatAmount(row.remaining)
+                  : row.limit === null
+                    ? row.used !== null
+                      ? t('usage.used', { used: formatAmount(row.used) })
+                      : row.remaining !== null
+                        ? formatAmount(row.remaining)
+                        : t('usage.unlimited')
+                    : percent !== null
+                      ? `${Math.round(percent)}%`
+                      : t('usage.used', { used: formatAmount(row.used) })}
               </span>
             </div>
             {percent !== null ? (
               <div className="dsh-usage-barTrack">
                 <div
-                  className={`dsh-usage-barFill dsh-usage-barFill--${barTone(percent)}`}
+                  className={`dsh-usage-barFill dsh-usage-barFill--${tone}`}
                   style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
                 />
               </div>
@@ -278,7 +371,7 @@ function UsageRows({ provider, now, t }: { provider: ProviderUsageView; now: num
   )
 }
 
-function ProviderCard({ provider, now, t }: { provider: ProviderUsageView; now: number; t: UsageActionProps['t'] }) {
+function ProviderCard({ provider, now, red, yellow, t }: { provider: ProviderUsageView; now: number; red: number; yellow: number; t: UsageActionProps['t'] }) {
   return (
     <div className={`dsh-usage-card${provider.active ? ' dsh-usage-card--active' : ''}`}>
       <div className="dsh-usage-cardHead">
@@ -294,22 +387,25 @@ function ProviderCard({ provider, now, t }: { provider: ProviderUsageView; now: 
       ) : provider.status === 'error' ? (
         <span className="dsh-usage-message">{t('status.error')}: {provider.message}</span>
       ) : provider.kind === 'balance' ? (
-        (provider.balances ?? []).map((row, index) => (
-          <div key={`${row.currency}-${index}`}>
-            <div className="dsh-usage-balanceRow">
-              <span className="dsh-usage-balanceTotal">{row.total}</span>
-              <span className="dsh-usage-balanceCurrency">{row.currency}</span>
+        (provider.balances ?? []).map((row, index) => {
+          const tone = balanceTone(toAmount(row.total), red, yellow)
+          return (
+            <div key={`${row.currency}-${index}`}>
+              <div className="dsh-usage-balanceRow">
+                <span className={`dsh-usage-balanceTotal${tone === 'ok' ? '' : ` dsh-usage-balanceTotal--${tone}`}`}>{row.total}</span>
+                <span className="dsh-usage-balanceCurrency">{row.currency}</span>
+              </div>
+              <span className="dsh-usage-balanceParts">
+                {[row.granted !== '0' && row.granted !== '0.00' ? t('balance.granted', { amount: row.granted }) : null,
+                  row.toppedUp !== '0' && row.toppedUp !== '0.00' ? t('balance.toppedUp', { amount: row.toppedUp }) : null]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
             </div>
-            <span className="dsh-usage-balanceParts">
-              {[row.granted !== '0' && row.granted !== '0.00' ? t('balance.granted', { amount: row.granted }) : null,
-                row.toppedUp !== '0' && row.toppedUp !== '0.00' ? t('balance.toppedUp', { amount: row.toppedUp }) : null]
-                .filter(Boolean)
-                .join(' · ')}
-            </span>
-          </div>
-        ))
+          )
+        })
       ) : (
-        <UsageRows provider={provider} now={now} t={t} />
+        <UsageRows provider={provider} now={now} red={red} yellow={yellow} t={t} />
       )}
     </div>
   )
@@ -368,6 +464,11 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
   const [loading, setLoading] = useState(false)
   const [intervalSec, setIntervalSec] = useState(() => readStoredInterval() ?? DEFAULT_INTERVAL)
   const [langOverride, setLangOverride] = useState<Lang | null>(() => readStoredLang())
+  /** Balance thresholds as raw input strings (kept as text so typing never
+      fights the controlled input); parsed on use, overridden locally only
+      after the user edits them. */
+  const [redThreshold, setRedThreshold] = useState<string>(() => readStoredThreshold(THRESHOLD_RED_KEY) ?? String(DEFAULT_BALANCE_RED))
+  const [yellowThreshold, setYellowThreshold] = useState<string>(() => readStoredThreshold(THRESHOLD_YELLOW_KEY) ?? String(DEFAULT_BALANCE_YELLOW))
   const [now, setNow] = useState(() => Date.now())
   /** Pinned spot (user-dragged) as viewport fractions; null = follow the default dock. */
   const [pinnedPos, setPinnedPos] = useState<FloatPos | null>(() => readStoredFloatPos())
@@ -439,6 +540,19 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
+  // Adopt the deployment-suggested balance thresholds until the user edits
+  // them locally (a stored override always wins, like the refresh interval).
+  useEffect(() => {
+    if (data === null) return
+    if (readStoredThreshold(THRESHOLD_RED_KEY) === null && typeof data.balanceRedThreshold === 'number') {
+      setRedThreshold(String(data.balanceRedThreshold))
+    }
+    if (readStoredThreshold(THRESHOLD_YELLOW_KEY) === null && typeof data.balanceYellowThreshold === 'number') {
+      setYellowThreshold(String(data.balanceYellowThreshold))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
+
   // Slow tick so reset countdowns advance while the panel is open.
   useEffect(() => {
     if (!open) return
@@ -491,7 +605,12 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const tone = healthTone(data, error)
+  // Effective thresholds: parse the inputs, fall back to defaults, and keep
+  // the red zone at or below the yellow one so both stay meaningful.
+  const effYellow = parseThreshold(yellowThreshold) ?? DEFAULT_BALANCE_YELLOW
+  const effRed = Math.min(parseThreshold(redThreshold) ?? DEFAULT_BALANCE_RED, effYellow)
+
+  const tone = healthTone(data, error, effRed, effYellow)
 
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== 'Escape' || !open) return
@@ -634,7 +753,7 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
             <span className="dsh-usage-message">{tt('panel.empty')}</span>
           ) : null}
           {(data?.providers ?? []).map((provider) => (
-            <ProviderCard key={provider.id} provider={provider} now={now} t={tt} />
+            <ProviderCard key={provider.id} provider={provider} now={now} red={effRed} yellow={effYellow} t={tt} />
           ))}
           <div className="dsh-usage-foot">
             <span className="dsh-usage-footLabel">{tt('panel.interval')}</span>
@@ -656,6 +775,39 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
                 ? tt('panel.never')
                 : tt('panel.updated', { time: new Date(data.fetchedAt).toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US') })}
             </span>
+          </div>
+          <div className="dsh-usage-thresholds">
+            <span className="dsh-usage-footLabel">{tt('panel.thresholds')}</span>
+            <label className="dsh-usage-thresholdField" title={tt('panel.thresholdRed')}>
+              <span className="dsh-usage-thresholdLabel dsh-usage-thresholdLabel--red">{tt('panel.thresholdRed')}</span>
+              <input
+                className="dsh-usage-thresholdInput"
+                type="number"
+                min={0}
+                step={0.01}
+                inputMode="decimal"
+                value={redThreshold}
+                onChange={(event) => {
+                  setRedThreshold(event.target.value)
+                  storeThreshold(THRESHOLD_RED_KEY, event.target.value)
+                }}
+              />
+            </label>
+            <label className="dsh-usage-thresholdField" title={tt('panel.thresholdYellow')}>
+              <span className="dsh-usage-thresholdLabel dsh-usage-thresholdLabel--yellow">{tt('panel.thresholdYellow')}</span>
+              <input
+                className="dsh-usage-thresholdInput"
+                type="number"
+                min={0}
+                step={0.01}
+                inputMode="decimal"
+                value={yellowThreshold}
+                onChange={(event) => {
+                  setYellowThreshold(event.target.value)
+                  storeThreshold(THRESHOLD_YELLOW_KEY, event.target.value)
+                }}
+              />
+            </label>
           </div>
           </div>,
           document.body,

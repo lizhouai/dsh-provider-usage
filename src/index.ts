@@ -89,6 +89,10 @@ export interface UsageListResult {
   fetchedAt: string
   /** Deployment-suggested refresh interval; the widget may override it locally. */
   refreshSeconds: number
+  /** Deployment-suggested balance thresholds (per the balance's own currency);
+      the panel may override them locally. */
+  balanceRedThreshold: number
+  balanceYellowThreshold: number
   /** Plugin package version, surfaced in the panel header. */
   version: string
   providers: ProviderUsageView[]
@@ -152,6 +156,12 @@ const ProviderSpec = z.object({
 export const Config = z.object({
   /** Suggested widget refresh interval in seconds (the panel may override it locally). */
   refreshSeconds: z.number().step(1).min(5).max(86400).default(60),
+  /** Balance below this amount turns red, compared in the balance's own currency
+      (the panel may override it locally). */
+  balanceRedThreshold: z.number().step(0.01).min(0).default(10),
+  /** Balance below this amount turns yellow, compared in the balance's own currency
+      (the panel may override it locally). */
+  balanceYellowThreshold: z.number().step(0.01).min(0).default(30),
   /** Enumerate live provider routes from the llm registry. */
   autoDetect: z.boolean().default(true),
   /** Manual provider specs; an id matching a detected route overrides it. */
@@ -160,6 +170,8 @@ export const Config = z.object({
 
 export interface ProviderUsageConfig {
   refreshSeconds: number
+  balanceRedThreshold: number
+  balanceYellowThreshold: number
   autoDetect: boolean
   providers: Array<{
     id: string
@@ -830,6 +842,8 @@ export class UsageService extends TypertRemoteService {
     return {
       fetchedAt: new Date().toISOString(),
       refreshSeconds: this.options().refreshSeconds,
+      balanceRedThreshold: this.options().balanceRedThreshold,
+      balanceYellowThreshold: this.options().balanceYellowThreshold,
       version,
       providers,
     }

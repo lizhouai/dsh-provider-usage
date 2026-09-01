@@ -120,12 +120,19 @@ const CSS = `
   color: var(--dsw-alias-label-primary); font-size: 18px; font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+/* Balance below the user-configured thresholds: red < red threshold, yellow
+   below the yellow threshold; a healthy balance keeps the default label color. */
+.dsh-usage-balanceTotal--warn { color: #e2b93b; }
+.dsh-usage-balanceTotal--danger { color: #d94f4f; }
 .dsh-usage-balanceCurrency { color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .dsh-usage-balanceParts { color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
 .dsh-usage-row { display: flex; flex-direction: column; gap: 3px; }
 .dsh-usage-rowHead { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 18px; }
 .dsh-usage-rowLabel { color: var(--dsw-alias-label-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsh-usage-rowValue { color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; flex: none; }
+/* Credits rows show a remaining balance: tinted by the balance thresholds. */
+.dsh-usage-rowValue--warn { color: #e2b93b; }
+.dsh-usage-rowValue--danger { color: #d94f4f; }
 .dsh-usage-barTrack {
   height: 4px; border-radius: 2px; overflow: hidden;
   background: var(--dsw-alias-border-l2);
@@ -145,6 +152,25 @@ const CSS = `
   color: var(--dsw-alias-label-secondary); font-size: 11px; padding: 2px 4px; cursor: pointer;
 }
 .dsh-usage-updated { color: var(--dsw-alias-label-tertiary); font-size: 11px; margin-left: auto; }
+/* Balance threshold row under the footer: red/yellow inputs persisted locally. */
+.dsh-usage-thresholds {
+  display: flex; align-items: center; gap: 10px; padding: 2px 4px 4px;
+}
+.dsh-usage-thresholdField { display: inline-flex; align-items: center; gap: 4px; }
+.dsh-usage-thresholdLabel { font-size: 11px; font-weight: 600; }
+.dsh-usage-thresholdLabel--red { color: #d94f4f; }
+.dsh-usage-thresholdLabel--yellow { color: #e2b93b; }
+.dsh-usage-thresholdInput {
+  width: 58px; box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; background: 0;
+  color: var(--dsw-alias-label-secondary); font-size: 11px; padding: 2px 4px;
+  font-variant-numeric: tabular-nums;
+}
+.dsh-usage-thresholdInput:focus {
+  outline: none;
+  border-color: var(--dsw-alias-accent, #4f8cff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-accent, #4f8cff) 40%, transparent);
+}
 `
 
 const TAG_ID = 'dsh-provider-usage/panel.css'

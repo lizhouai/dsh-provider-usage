@@ -33,10 +33,11 @@
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | team credit balance |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | prepaid balance (USD) |
 - **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk. For OAuth providers (OpenAI Codex) the plugin reads the grant record the sign-in flow stored, and refreshes it transparently when it is about to expire.
-- **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The halo around the ball encodes the health of the provider **in use** (the composer's current model selection): green all good, amber some quota below 30% left, red on query failure / missing key / usage ≥90%. Idle providers with low quota do not color the ball — switch to another provider with enough quota and the ball turns green again; the panel marks the in-use provider and still lists every provider's numbers.
+- **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The halo around the ball encodes the health of the provider **in use** (the composer's current model selection): green all good, amber some quota below 30% left or a balance below the yellow threshold, red on query failure / missing key / usage ≥90% / balance below the red threshold. Idle providers with low quota do not color the ball — switch to another provider with enough quota and the ball turns green again; the panel marks the in-use provider and still lists every provider's numbers.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
 - **Bilingual panel** — built-in Chinese/English UI; follows the harness language by default, with a one-click toggle in the panel header (persisted in localStorage).
 - **Configurable refresh** — adjustable in the panel (15s–30min, persisted in localStorage); the default comes from the plugin config.
+- **Configurable balance thresholds** — balance-type providers (DeepSeek, Moonshot, Vercel AI Gateway, xAI) and the `credits` rows of usage-type providers (OpenRouter, OpenAI Codex) turn red below the red threshold and yellow below the yellow threshold, compared in the balance's own currency (defaults: red < 10, yellow < 30, whether CNY or USD). Both values are editable directly in the panel footer (persisted in localStorage); the defaults come from the plugin config.
 - **Manual providers** — add arbitrary gateways (e.g. a self-hosted DeepSeek-compatible endpoint) via config.
 
 ## Screenshots
@@ -129,14 +130,18 @@ Defaults work out of the box: the plugin auto-detects every provider route of th
 - id: provider-usage
   name: dsh-provider-usage
   config:
-    refreshSeconds: 60   # suggested panel refresh interval (5–86400)
-    autoDetect: true     # enumerate provider routes from the llm registry
-    providers: []        # manual specs; an id matching a detected route overrides it
+    refreshSeconds: 60          # suggested panel refresh interval (5–86400)
+    balanceRedThreshold: 10     # balance below this turns red (per the balance's own currency)
+    balanceYellowThreshold: 30  # balance below this turns yellow (per the balance's own currency)
+    autoDetect: true            # enumerate provider routes from the llm registry
+    providers: []               # manual specs; an id matching a detected route overrides it
 ```
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `refreshSeconds` | number | `60` | Suggested widget refresh interval in seconds (5–86400) |
+| `balanceRedThreshold` | number | `10` | Balance below this amount turns red, compared in the balance's own currency |
+| `balanceYellowThreshold` | number | `30` | Balance below this amount turns yellow, compared in the balance's own currency |
 | `autoDetect` | boolean | `true` | Enumerate live provider routes from the llm registry |
 | `providers` | array | `[]` | Manual provider specs: `{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`; `kind` is one of the adapter table above |
 

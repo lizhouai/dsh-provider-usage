@@ -33,10 +33,11 @@
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | 团队 credit 余额 |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | 预付余额（USD） |
 - **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。对 OAuth 类 Provider（OpenAI Codex）则直接读取登录流程存入的授权记录，并在令牌临近过期时自动刷新。
-- **悬浮球入口** —— 可任意拖动的悬浮球点击弹出用量面板，位置持久化；默认停靠在主对话区域左下角（左边距 = 底边距），面板头部的归位按钮一键回到默认位置；球体光晕表达**当前正在使用**的 Provider（composer 中选中的模型）的健康度：绿色正常、黄色配额剩余不足 30%、红色查询失败/缺密钥/用量 ≥90%。闲置的 Provider 余量不足不再影响悬浮球颜色——切换到余量充足的另一个 Provider 后球体会恢复绿色；面板会标注"使用中"的 Provider，并照常列出所有 Provider 的用量明细。
+- **悬浮球入口** —— 可任意拖动的悬浮球点击弹出用量面板，位置持久化；默认停靠在主对话区域左下角（左边距 = 底边距），面板头部的归位按钮一键回到默认位置；球体光晕表达**当前正在使用**的 Provider（composer 中选中的模型）的健康度：绿色正常、黄色配额剩余不足 30% 或余额低于黄阈值、红色查询失败/缺密钥/用量 ≥90% 或余额低于红阈值。闲置的 Provider 余量不足不再影响悬浮球颜色——切换到余量充足的另一个 Provider 后球体会恢复绿色；面板会标注"使用中"的 Provider，并照常列出所有 Provider 的用量明细。
 - **版本徽章** —— 面板标题旁显示当前运行的插件版本，一眼确认加载的是哪个发布版。
 - **中英双语** —— 面板内置中英文界面，默认跟随 harness 系统语言，标题栏按钮一键切换（localStorage 持久化）。
 - **刷新周期可调** —— 面板内调整（15s–30min，localStorage 持久化），默认值由插件配置提供。
+- **余额阈值可调** —— 余额型 Provider（DeepSeek、Moonshot、Vercel AI Gateway、xAI）以及 usage 型 Provider 中的 `credits` 行（OpenRouter、OpenAI Codex）会按余额数值变色：低于红阈值变红、低于黄阈值变黄（按查询到的币种本身比较，默认红 < 10、黄 < 30，人民币/美元一致）。两个阈值可直接在面板底部修改（localStorage 持久化），默认值由插件配置提供。
 - **手动 provider** —— 可通过配置添加任意网关（如自建 DeepSeek 兼容端点）。
 
 ## 截图
@@ -129,14 +130,18 @@ dsh plugin --profile web add dsh-provider-usage@latest
 - id: provider-usage
   name: dsh-provider-usage
   config:
-    refreshSeconds: 60   # 面板默认刷新周期（秒）
-    autoDetect: true     # 自动枚举 llm 注册表中的 provider
-    providers: []        # 手动补充/覆盖 provider（id 相同则覆盖自动探测结果）
+    refreshSeconds: 60          # 面板默认刷新周期（秒）
+    balanceRedThreshold: 10     # 余额低于该值变红（按余额自身币种比较）
+    balanceYellowThreshold: 30  # 余额低于该值变黄（按余额自身币种比较）
+    autoDetect: true            # 自动枚举 llm 注册表中的 provider
+    providers: []               # 手动补充/覆盖 provider（id 相同则覆盖自动探测结果）
 ```
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `refreshSeconds` | number | `60` | 面板建议刷新周期（秒），5–86400 |
+| `balanceRedThreshold` | number | `10` | 余额低于该值变红，按余额自身币种比较 |
+| `balanceYellowThreshold` | number | `30` | 余额低于该值变黄，按余额自身币种比较 |
 | `autoDetect` | boolean | `true` | 从 llm 注册表自动枚举 provider |
 | `providers` | array | `[]` | 手动 provider 规格：`{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`，`kind` 取上表中的任一适配器 |
 
