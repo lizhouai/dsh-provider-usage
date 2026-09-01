@@ -10,20 +10,20 @@
 
 # dsh-provider-usage
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件：在 Web GUI 上悬浮一个可任意拖动的用量球，实时查看所有已配置 LLM provider 的账户余额与配额用量——不用再逐个登录 provider 控制台确认。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件：在 Web GUI 上悬浮一个可任意拖动的用量球，实时查看所有已配置 LLM provider 的账户余额与用量——不用再逐个登录 provider 控制台确认。
 
 ## 功能
 
 - **自动探测** —— 自动枚举当前 profile 中已注册的 provider 路由（`ctx.llm`），常见路由零配置。
-- **按 provider 类型查询额度** —— 没有公开余额/配额接口的路由（Google、Mistral、Groq、Bedrock、Azure、Qwen Token Plan 等）会在面板中标注为「不支持」，而不是被静默忽略：
+- **按 provider 类型查询额度** —— 没有公开余额/用量接口的路由（Google、Mistral、Groq、Bedrock、Azure、Qwen Token Plan 等）会在面板中标注为「不支持」，而不是被静默忽略：
 
   | kind | 路由 | 查询接口 | 展示内容 |
   |---|---|---|---|
   | `deepseek` | `deepseek-official`、`deepseek` | `GET {baseURL}/user/balance` | 余额（含赠送/充值明细） |
   | `moonshot` | `moonshotai-cn`、`moonshotai` | `GET {baseURL}/users/me/balance` | 可用/代金券/现金余额 |
-  | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | 每周配额及各限速窗口，含重置倒计时 |
+  | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | 每周用量及各限速窗口，含重置倒计时 |
   | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credit 已用/总额 |
-  | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | 付费档配额快照 / 免费档月度配额 |
+  | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | 付费档用量快照 / 免费档月度用量 |
   | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT 订阅 5h/周窗口 + credits + spend control（**OAuth 登录**，非 API key，见 [通过 OAuth 添加 OpenAI Codex](#通过-oauth-添加-openai-codex)） |
   | `openai` | `openai` | `GET {origin}/v1/organization/costs` | 当月花费（**需 Admin key**，普通 key 会 403） |
   | `anthropic` | `anthropic` | `GET {baseURL}/v1/organizations/cost_report` | 当月花费（**需 Admin key**，`x-api-key` 头） |
@@ -33,7 +33,7 @@
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | 团队 credit 余额 |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | 预付余额（USD） |
 - **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。对 OAuth 类 Provider（OpenAI Codex）则直接读取登录流程存入的授权记录，并在令牌临近过期时自动刷新。
-- **悬浮球入口** —— 可任意拖动的悬浮球点击弹出用量面板，位置持久化；默认停靠在主对话区域左下角（左边距 = 底边距），面板头部的归位按钮一键回到默认位置；Provider 列表超过面板高度时自动滚动，面板**顶部边缘可拖拽**调整面板高度（变长/变短，localStorage 持久化）；球体光晕表达**当前正在使用**的 Provider——即**当前聚焦 session 自己的模型选择**（composer 模型座同源，客户端实时跟踪），因此切换 session 后无需重新选择模型，面板会立即把"使用中"标记切到该 session 的 Provider：绿色正常、黄色配额剩余不足 30% 或余额低于黄阈值、红色查询失败/缺密钥/用量 ≥90% 或余额低于红阈值。闲置的 Provider 余量不足不再影响悬浮球颜色——切换到余量充足的另一个 Provider 后球体会恢复绿色；面板会标注"使用中"的 Provider，并照常列出所有 Provider 的用量明细。
+- **悬浮球入口** —— 可任意拖动的悬浮球点击弹出用量面板，位置持久化；默认停靠在主对话区域左下角（左边距 = 底边距），面板头部的归位按钮一键回到默认位置；Provider 列表超过面板高度时自动滚动，面板**顶部边缘可拖拽**调整面板高度（变长/变短，localStorage 持久化）；球体光晕表达**当前正在使用**的 Provider——即**当前聚焦 session 自己的模型选择**（composer 模型座同源，客户端实时跟踪），因此切换 session 后无需重新选择模型，面板会立即把"使用中"标记切到该 session 的 Provider：绿色正常、黄色用量窗口剩余不足 30% 或余额低于黄阈值、红色查询失败/缺密钥/用量 ≥90% 或余额低于红阈值。闲置的 Provider 余量不足不再影响悬浮球颜色——切换到余量充足的另一个 Provider 后球体会恢复绿色；面板会标注"使用中"的 Provider，并照常列出所有 Provider 的用量明细。
 - **版本徽章** —— 面板标题旁显示当前运行的插件版本，一眼确认加载的是哪个发布版。
 - **中英双语** —— 面板内置中英文界面，默认跟随 harness 系统语言，标题栏按钮一键切换（localStorage 持久化）。
 - **刷新周期可调** —— 面板内调整（15s–30min，localStorage 持久化），默认值由插件配置提供。

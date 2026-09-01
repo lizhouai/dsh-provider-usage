@@ -15,15 +15,15 @@
 ## Features
 
 - **Auto-detection** — enumerates the provider routes registered in the current profile (`ctx.llm`); zero configuration for well-known routes.
-- **Per-kind wire adapters** — routes with no public balance/quota API (Google, Mistral, Groq, Bedrock, Azure, Qwen Token Plan, …) are listed as `unsupported` instead of being silently dropped:
+- **Per-kind wire adapters** — routes with no public balance/usage API (Google, Mistral, Groq, Bedrock, Azure, Qwen Token Plan, …) are listed as `unsupported` instead of being silently dropped:
 
   | kind | routes | query | shows |
   |---|---|---|---|
   | `deepseek` | `deepseek-official`, `deepseek` | `GET {baseURL}/user/balance` | total / granted / topped-up balance |
   | `moonshot` | `moonshotai-cn`, `moonshotai` | `GET {baseURL}/users/me/balance` | available / voucher / cash balance |
-  | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | weekly quota + rate-limit windows, reset countdown |
+  | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | weekly usage + rate-limit windows, reset countdown |
   | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credits used / total |
-  | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | plan quota snapshots (paid) or monthly quotas (free) |
+  | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | plan usage snapshots (paid) or monthly usage (free) |
   | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT subscription 5h / weekly windows + credits + spend control (**OAuth login**, not an API key — see [OpenAI Codex via OAuth](#openai-codex-via-oauth)) |
   | `openai` | `openai` | `GET {origin}/v1/organization/costs` | current-month spend (**admin key required**; a regular key fails with 403) |
   | `anthropic` | `anthropic` | `GET {baseURL}/v1/organizations/cost_report` | current-month spend (**admin key required**, `x-api-key` auth) |
@@ -33,7 +33,7 @@
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | team credit balance |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | prepaid balance (USD) |
 - **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk. For OAuth providers (OpenAI Codex) the plugin reads the grant record the sign-in flow stored, and refreshes it transparently when it is about to expire.
-- **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The panel scrolls when the provider list grows past its height, and its top edge is draggable to resize it taller or shorter (height persisted). The halo around the ball encodes the health of the provider **in use** — the focused session's own selection (its composer's model seat), tracked live on the client, so switching sessions re-highlights that session's provider immediately without re-selecting a model: green all good, amber some quota below 30% left or a balance below the yellow threshold, red on query failure / missing key / usage ≥90% / balance below the red threshold. Idle providers with low quota do not color the ball — switch to another provider with enough quota and the ball turns green again; the panel marks the in-use provider and still lists every provider's numbers.
+- **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The panel scrolls when the provider list grows past its height, and its top edge is draggable to resize it taller or shorter (height persisted). The halo around the ball encodes the health of the provider **in use** — the focused session's own selection (its composer's model seat), tracked live on the client, so switching sessions re-highlights that session's provider immediately without re-selecting a model: green all good, amber when a usage window has under 30% left or a balance below the yellow threshold, red on query failure / missing key / usage ≥90% / balance below the red threshold. Idle providers running low do not color the ball — switch to another provider with enough headroom and the ball turns green again; the panel marks the in-use provider and still lists every provider's numbers.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
 - **Bilingual panel** — built-in Chinese/English UI; follows the harness language by default, with a one-click toggle in the panel header (persisted in localStorage).
 - **Configurable refresh** — adjustable in the panel (15s–30min, persisted in localStorage); the default comes from the plugin config.
@@ -50,7 +50,7 @@ The floating ball (bottom-left, with the green healthy halo) and the open usage 
 
 ## OpenAI Codex via OAuth
 
-OpenAI Codex is a **ChatGPT-subscription** provider: it authenticates with an OAuth access token, not an API key, so there is nothing to paste into a key field. dsh itself has no OAuth *button* for this route — but this plugin can still query its quota, because it reads the OAuth grant out of the harness credential store. Set the provider up once, and the usage panel shows your real 5-hour / weekly Codex windows.
+OpenAI Codex is a **ChatGPT-subscription** provider: it authenticates with an OAuth access token, not an API key, so there is nothing to paste into a key field. dsh itself has no OAuth *button* for this route — but this plugin can still query its usage, because it reads the OAuth grant out of the harness credential store. Set the provider up once, and the usage panel shows your real 5-hour / weekly Codex windows.
 
 ### 1. Make sure the route exists
 
@@ -80,7 +80,7 @@ records:
 
 > The grant must land in the harness credential store (the record above). Codex clients that keep their own credential file (e.g. `dsh-codex`'s `$DSH_HOME/.openai-codex-auth.json`, or the Codex CLI's `~/.codex/auth.json`) do not write this record, so this plugin cannot see them.
 
-### 3. Watch the quota
+### 3. Watch the usage
 
 That's it. The route is auto-detected (`ctx.llm` lists `openai-codex`), and the plugin:
 
