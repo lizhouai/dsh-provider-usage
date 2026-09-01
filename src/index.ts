@@ -70,6 +70,9 @@ export interface ProviderUsageView {
   message: string | null
   balances: BalanceRow[] | null
   usages: UsageRow[] | null
+  /** True when this route is the harness's current default model selection —
+      the provider in use, which alone drives the widget's health tone. */
+  active: boolean
 }
 
 export interface UsageListResult {
@@ -347,8 +350,8 @@ function okView(base: Omit<ProviderUsageView, 'status' | 'message'>): ProviderUs
   return { ...base, status: 'ok', message: null }
 }
 
-function failView(id: string, displayName: string, kind: ProviderUsageView['kind'], status: ProviderUsageView['status'], message: string): ProviderUsageView {
-  return { id, displayName, kind, status, message, balances: null, usages: null }
+function failView(id: string, displayName: string, kind: ProviderUsageView['kind'], status: ProviderUsageView['status'], message: string, active: boolean): ProviderUsageView {
+  return { id, displayName, kind, status, message, balances: null, usages: null, active }
 }
 
 /** Strip trailing slashes from a route baseURL. */
@@ -750,13 +753,29 @@ export class UsageService extends TypertRemoteService {
    */
   async list(signal?: AbortSignal): Promise<UsageListResult> {
     const specs = await this.collectSpecs()
-    const providers = await Promise.all(specs.map((spec) => this.fetchProvider(spec, signal)))
+    const activeProviderId = this.currentProviderId()
+    const providers = await Promise.all(specs.map((spec) => this.fetchProvider(spec, activeProviderId, signal)))
     return {
       fetchedAt: new Date().toISOString(),
       refreshSeconds: this.options().refreshSeconds,
       version,
       providers,
     }
+  }
+
+  /**
+   * The provider route in use: the harness's current default model selection,
+   * kept in sync whenever the composer's model seat selects a provider/model
+   * (`session/selectModel` → `agent-default-model` settings). Null when the
+   * service is not mounted or no selection is stored yet — the client then
+   * falls back to judging every provider.
+   */
+  private currentProviderId(): string | null {
+    const service = this.ctx.get('agentDefaultModel') as
+      | { currentSelection?: () => { provider: string } }
+      | undefined
+    const provider = service?.currentSelection?.().provider
+    return typeof provider === 'string' && provider !== '' ? provider : null
   }
 
   /** Enumerate provider routes (registry + settings), then apply manual overrides. */
@@ -831,15 +850,16 @@ export class UsageService extends TypertRemoteService {
     return undefined
   }
 
-  private async fetchProvider(spec: DetectedProvider, outerSignal?: AbortSignal): Promise<ProviderUsageView> {
+  private async fetchProvider(spec: DetectedProvider, activeProviderId: string | null, outerSignal?: AbortSignal): Promise<ProviderUsageView> {
     if ('unsupported' in spec) {
-      return failView(spec.route.id, spec.route.name || spec.route.id, null, 'unsupported', spec.route.id)
+      return failView(spec.route.id, spec.route.name || spec.route.id, null, 'unsupported', spec.route.id, spec.route.id === activeProviderId)
     }
+    const active = spec.id === activeProviderId
     const adapter = ADAPTERS[spec.kind]
-    const base = { id: spec.id, displayName: spec.displayName, kind: adapter.view, balances: null, usages: null }
+    const base = { id: spec.id, displayName: spec.displayName, kind: adapter.view, balances: null, usages: null, active }
     const apiKey = await this.resolveApiKey(spec.apiKeyEnv)
     if (apiKey === undefined) {
-      return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', spec.apiKeyEnv)
+      return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', spec.apiKeyEnv, active)
     }
     const signal = AbortSignal.any([AbortSignal.timeout(15000), ...(outerSignal ? [outerSignal] : [])])
     try {
@@ -848,7 +868,7 @@ export class UsageService extends TypertRemoteService {
     } catch (error) {
       if (outerSignal?.aborted) throw error
       const message = error instanceof Error ? error.message : String(error)
-      return failView(spec.id, spec.displayName, adapter.view, 'error', message)
+      return failView(spec.id, spec.displayName, adapter.view, 'error', message, active)
     }
   }
 }

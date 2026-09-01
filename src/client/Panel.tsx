@@ -38,6 +38,8 @@ interface ProviderUsageView {
   message: string | null
   balances: BalanceRow[] | null
   usages: UsageRow[] | null
+  /** The provider in use (absent on older hosts); it alone drives the ball tone. */
+  active?: boolean
 }
 
 interface UsageListResult {
@@ -206,11 +208,17 @@ function barTone(percent: number | null): 'ok' | 'warn' | 'danger' {
   return 'ok'
 }
 
-/** Worst health across the fetch + every provider: drives the trigger's status dot. */
+/** Worst health across the fetch + the provider IN USE: drives the trigger's
+    status dot. Only the active provider (the composer's current selection)
+    colors the ball, so an idle low-quota provider does not alarm; when the
+    host reports no active provider, fall back to every provider. */
 function healthTone(data: UsageListResult | null, error: string | null): 'ok' | 'warn' | 'danger' {
   if (error !== null) return 'danger'
+  const providers = data?.providers ?? []
+  const active = providers.filter((provider) => provider.active)
+  const relevant = active.length > 0 ? active : providers
   let tone: 'ok' | 'warn' | 'danger' = 'ok'
-  for (const provider of data?.providers ?? []) {
+  for (const provider of relevant) {
     if (provider.status === 'error' || provider.status === 'missing-credential') return 'danger'
     for (const row of provider.usages ?? []) {
       const rowTone = barTone(row.percent)
@@ -272,9 +280,10 @@ function UsageRows({ provider, now, t }: { provider: ProviderUsageView; now: num
 
 function ProviderCard({ provider, now, t }: { provider: ProviderUsageView; now: number; t: UsageActionProps['t'] }) {
   return (
-    <div className="dsh-usage-card">
+    <div className={`dsh-usage-card${provider.active ? ' dsh-usage-card--active' : ''}`}>
       <div className="dsh-usage-cardHead">
         <span className="dsh-usage-providerName">{provider.displayName}</span>
+        {provider.active ? <span className="dsh-usage-inUse">{t('status.inUse')}</span> : null}
       </div>
       {provider.status === 'unsupported' ? (
         <span className="dsh-usage-message">{t('status.unsupported')}</span>

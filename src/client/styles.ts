@@ -4,8 +4,8 @@
  */
 const CSS = `
 .dsh-usage-root { position: relative; display: inline-flex; }
-/* Tri-tone health halo: only the shadow carries the worst provider state
-   (green ok / amber remaining<30% / red error or usage>=90%) — the button
+/* Tri-tone health halo: only the shadow carries the state of the provider IN
+   USE (green ok / amber remaining<30% / red error or usage>=90%) — the button
    face itself stays neutral. A 1px tone ring plus a soft halo keeps the
    state readable on both light and dark skins. */
 .dsh-usage-tone-ok { --dsh-usage-tone: #22a06b; }
@@ -98,10 +98,21 @@ const CSS = `
   border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;
   background: var(--dsw-alias-fill-l2);
 }
+/* The provider in use, whose quota alone drives the ball tone. */
+.dsh-usage-card--active {
+  outline: 1px solid color-mix(in srgb, var(--dsw-alias-accent, #4f8cff) 45%, transparent);
+  outline-offset: -1px;
+}
 .dsh-usage-cardHead { display: flex; align-items: center; gap: 8px; }
 .dsh-usage-providerName {
   color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600;
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.dsh-usage-inUse {
+  flex: none; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 999px;
+  color: var(--dsw-alias-label-secondary);
+  background: color-mix(in srgb, var(--dsw-alias-accent, #4f8cff) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-accent, #4f8cff) 35%, transparent);
 }
 .dsh-usage-message { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; word-break: break-all; }
 .dsh-usage-balanceRow { display: flex; align-items: baseline; gap: 8px; }
