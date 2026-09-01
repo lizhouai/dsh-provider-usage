@@ -62,6 +62,27 @@ const CSS = `
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
+/* Top-edge resize handle: sticks to the panel top even while the body
+   scrolls, so it is always grabbable; drag to make the panel taller/shorter
+   (height persisted in localStorage). */
+.dsh-usage-resize {
+  position: sticky; top: 0; z-index: 2; flex: none;
+  height: 6px; margin: -4px 0 0;
+  cursor: ns-resize; touch-action: none;
+  border-radius: 3px;
+}
+.dsh-usage-resize::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px; height: 3px; border-radius: 2px;
+  background: var(--dsw-alias-border-l2);
+}
+.dsh-usage-resize:hover, .dsh-usage-resize:active {
+  background: color-mix(in srgb, var(--dsw-alias-accent, #4f8cff) 25%, transparent);
+}
+.dsh-usage-resize:hover::after, .dsh-usage-resize:active::after {
+  background: var(--dsw-alias-accent, #4f8cff);
+}
 .dsh-usage-head {
   display: flex; align-items: center; gap: 8px; padding: 2px 4px 6px;
   border-bottom: 1px solid var(--dsw-alias-border-l2);

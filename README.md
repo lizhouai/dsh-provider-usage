@@ -33,18 +33,20 @@
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | team credit balance |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | prepaid balance (USD) |
 - **Credentials stay safe** — API keys are resolved per request through the harness credentials service (environment variables / `~/.dsh/.credentials.yaml`); never cached, never written to disk. For OAuth providers (OpenAI Codex) the plugin reads the grant record the sign-in flow stored, and refreshes it transparently when it is about to expire.
-- **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The halo around the ball encodes the health of the provider **in use** (the composer's current model selection): green all good, amber some quota below 30% left or a balance below the yellow threshold, red on query failure / missing key / usage ≥90% / balance below the red threshold. Idle providers with low quota do not color the ball — switch to another provider with enough quota and the ball turns green again; the panel marks the in-use provider and still lists every provider's numbers.
+- **Floating ball widget** — a draggable floating ball opens the usage panel. Drop it anywhere in the viewport (position persisted); it docks by default at the bottom-left of the chat area with equal margins, and the panel-header home button sends it back. The panel scrolls when the provider list grows past its height, and its top edge is draggable to resize it taller or shorter (height persisted). The halo around the ball encodes the health of the provider **in use** — the focused session's own selection (its composer's model seat), tracked live on the client, so switching sessions re-highlights that session's provider immediately without re-selecting a model: green all good, amber some quota below 30% left or a balance below the yellow threshold, red on query failure / missing key / usage ≥90% / balance below the red threshold. Idle providers with low quota do not color the ball — switch to another provider with enough quota and the ball turns green again; the panel marks the in-use provider and still lists every provider's numbers.
 - **Version badge** — the panel header shows the running plugin version next to the title, so it is obvious which release is loaded.
 - **Bilingual panel** — built-in Chinese/English UI; follows the harness language by default, with a one-click toggle in the panel header (persisted in localStorage).
 - **Configurable refresh** — adjustable in the panel (15s–30min, persisted in localStorage); the default comes from the plugin config.
-- **Configurable balance thresholds** — balance-type providers (DeepSeek, Moonshot, Vercel AI Gateway, xAI) and the `credits` rows of usage-type providers (OpenRouter, OpenAI Codex) turn red below the red threshold and yellow below the yellow threshold, compared in the balance's own currency (defaults: red < 10, yellow < 30, whether CNY or USD). Both values are editable directly in the panel footer (persisted in localStorage); the defaults come from the plugin config.
+- **Configurable balance thresholds** — balance-type providers (DeepSeek, Moonshot, Vercel AI Gateway, xAI) and the `credits` rows of usage-type providers (OpenRouter, OpenAI Codex) turn red below the red threshold and yellow below the yellow threshold, compared in the balance's own currency (defaults: red < 10, yellow < 30, whether CNY or USD). Both values are editable directly in the panel footer (persisted in localStorage); the defaults come from the plugin config. For providers reporting both a subscription plan and credits (e.g. OpenAI Codex), the two are OR'ed: the ball stays green while either one has enough left, and when both are running low the lighter warning wins (the plan is normally consumed before credits).
 - **Manual providers** — add arbitrary gateways (e.g. a self-hosted DeepSeek-compatible endpoint) via config.
 
 ## Screenshots
 
 The floating ball (bottom-left, with the green healthy halo) and the open usage panel:
 
-![Usage panel in English](docs/panel-en.png)
+| DeepSeek in use | OpenAI Codex in use |
+| --- | --- |
+| ![DeepSeek balance panel (English)](docs/panel-ds-en.png) | ![OpenAI Codex usage panel (English)](docs/panel-codex-en.png) |
 
 ## OpenAI Codex via OAuth
 

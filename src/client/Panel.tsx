@@ -6,7 +6,7 @@
  * Polling interval is user-selectable (persisted in localStorage) and falls
  * back to the deployment-suggested value from the host plugin config.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { en, zh } from './locales'
 
@@ -62,6 +62,12 @@ export interface UsageActionProps {
   t: (key: string, params?: Record<string, unknown>) => string
   /** Business face: call the host `usage/list` remote. */
   fetchUsage: () => Promise<UsageListResult>
+  /** Provider the FOCUSED session's composer would use (live client state);
+      undefined when unavailable — the host's own flag then stands. */
+  getActiveProvider?: () => string | undefined
+  /** Subscribe to focused-session / model-selection changes; the panel
+      re-derives the "in use" flag on every change, without a poll tick. */
+  subscribeActiveChange?: (onChange: () => void) => (() => void)
 }
 
 /* ------------------------------------------------------------------ *
@@ -74,11 +80,56 @@ const LANG_KEY = 'dsh.provider-usage.lang'
 const POS_KEY = 'dsh.provider-usage.floatPos'
 const THRESHOLD_RED_KEY = 'dsh.provider-usage.balanceRedThreshold'
 const THRESHOLD_YELLOW_KEY = 'dsh.provider-usage.balanceYellowThreshold'
+const PANEL_HEIGHT_KEY = 'dsh.provider-usage.panelHeight'
 const DEFAULT_INTERVAL = 60
 /** Balance thresholds fall back to these hardcoded defaults when neither the
     host config nor a stored override provides them. */
 const DEFAULT_BALANCE_RED = 10
 const DEFAULT_BALANCE_YELLOW = 30
+/** Smallest panel height the top-edge drag allows (px). */
+const PANEL_MIN_H = 120
+
+/** Largest panel height the top-edge drag allows: the viewport minus a
+    breathing margin, so the panel can never outgrow the screen. */
+function panelMaxHeight(): number {
+  return Math.max(PANEL_MIN_H, window.innerHeight - 24)
+}
+
+/** Bottom padding of the open panel (px), read live so the layout math stays
+    correct if the stylesheet ever changes it. */
+function panelPaddingBottom(panel: HTMLElement): number {
+  const pad = Number.parseFloat(getComputedStyle(panel).paddingBottom)
+  return Number.isFinite(pad) ? pad : 0
+}
+
+/**
+ * Natural content height of the open panel — children plus padding — even
+ * while the panel itself is height-constrained or scrolled (children rects
+ * are compensated by scrollTop). This is the grow limit: at this height the
+ * panel needs no scrolling and leaves no blank strip at the bottom.
+ */
+function panelContentHeight(panel: HTMLElement): number {
+  const panelTop = panel.getBoundingClientRect().top
+  let bottom = 0
+  for (const child of Array.from(panel.children)) {
+    const rect = (child as HTMLElement).getBoundingClientRect()
+    bottom = Math.max(bottom, rect.bottom - panelTop + panel.scrollTop)
+  }
+  return Math.ceil(bottom) + panelPaddingBottom(panel)
+}
+
+/**
+ * Shrink limit: the height that keeps the panel head plus the FIRST provider
+ * card fully visible (bottom padding included). Falls back to PANEL_MIN_H
+ * when no provider card is present (e.g. empty list).
+ */
+function firstCardMinHeight(panel: HTMLElement): number {
+  const card = panel.querySelector<HTMLElement>('.dsh-usage-card')
+  if (card === null) return PANEL_MIN_H
+  const panelTop = panel.getBoundingClientRect().top
+  const cardRect = card.getBoundingClientRect()
+  return Math.ceil(cardRect.bottom - panelTop + panel.scrollTop) + panelPaddingBottom(panel)
+}
 
 /** Floating ball diameter in px; drag math derives from it. */
 const BALL_SIZE = 32
@@ -163,6 +214,29 @@ function readStoredThreshold(key: string): string | null {
 function storeThreshold(key: string, value: string): void {
   try {
     localStorage.setItem(key, value)
+  } catch {
+    /* storage unavailable: keep the in-memory value only */
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Panel height (user-resized via the top-edge drag handle)
+ * ------------------------------------------------------------------ */
+
+function readStoredPanelHeight(): number | null {
+  try {
+    const raw = localStorage.getItem(PANEL_HEIGHT_KEY)
+    if (raw === null) return null
+    const value = Number(raw)
+    return Number.isFinite(value) && value >= PANEL_MIN_H ? value : null
+  } catch {
+    return null
+  }
+}
+
+function storePanelHeight(value: number): void {
+  try {
+    localStorage.setItem(PANEL_HEIGHT_KEY, String(value))
   } catch {
     /* storage unavailable: keep the in-memory value only */
   }
@@ -269,32 +343,44 @@ function balanceTone(value: number | null, red: number, yellow: number): 'ok' | 
   return 'ok'
 }
 
-/**
- * Tone for one usage row. Windows with a percent (5h/weekly limits) keep the
- * percent-based tone; rows labeled 'credits' carry a remaining balance and
- * are judged by the balance thresholds instead.
- */
-function usageRowTone(row: UsageRow, red: number, yellow: number): 'ok' | 'warn' | 'danger' {
-  if (row.label === 'credits') return balanceTone(row.remaining, red, yellow)
-  return barTone(row.percent)
+type Tone = 'ok' | 'warn' | 'danger'
+
+const TONE_SEVERITY: Record<Tone, number> = { ok: 0, warn: 1, danger: 2 }
+
+/** More severe of two tones; used WITHIN one category. */
+function worseTone(a: Tone | null, b: Tone | null): Tone | null {
+  if (a === null) return b
+  if (b === null) return a
+  return TONE_SEVERITY[a] >= TONE_SEVERITY[b] ? a : b
 }
 
-/** Worst balance/usage tone across one provider's balances and usage rows. */
-function providerTone(provider: ProviderUsageView, red: number, yellow: number): 'ok' | 'warn' | 'danger' {
-  let tone: 'ok' | 'warn' | 'danger' = 'ok'
+/**
+ * Aggregate tone for one provider. The subscription/usage windows ("plan")
+ * and the prepaid balance/credits are two INDEPENDENT categories joined with
+ * OR semantics: the provider stays green while either category has enough
+ * left (the plan is normally consumed before credits, so the surviving
+ * resource sets the tone), and when both are running low the lighter warning
+ * wins. Within one category the worst row still governs — an exhausted 5h
+ * window is not "enough plan" just because the weekly window is healthy.
+ */
+function providerTone(provider: ProviderUsageView, red: number, yellow: number): Tone {
+  let planTone: Tone | null = null
+  let creditTone: Tone | null = null
   if (provider.kind === 'balance') {
     for (const row of provider.balances ?? []) {
-      const rowTone = balanceTone(toAmount(row.total), red, yellow)
-      if (rowTone === 'danger') return 'danger'
-      if (rowTone === 'warn') tone = 'warn'
+      creditTone = worseTone(creditTone, balanceTone(toAmount(row.total), red, yellow))
     }
   }
   for (const row of provider.usages ?? []) {
-    const rowTone = usageRowTone(row, red, yellow)
-    if (rowTone === 'danger') return 'danger'
-    if (rowTone === 'warn') tone = 'warn'
+    if (row.label === 'credits') {
+      creditTone = worseTone(creditTone, balanceTone(row.remaining, red, yellow))
+    } else {
+      planTone = worseTone(planTone, barTone(row.percent))
+    }
   }
-  return tone
+  if (planTone === null) return creditTone ?? 'ok'
+  if (creditTone === null) return planTone
+  return TONE_SEVERITY[planTone] <= TONE_SEVERITY[creditTone] ? planTone : creditTone
 }
 
 /** Worst health across the fetch + the provider IN USE: drives the trigger's
@@ -319,6 +405,25 @@ function healthTone(data: UsageListResult | null, error: string | null, red: num
 function formatAmount(value: number | null): string {
   if (value === null) return '—'
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
+
+/**
+ * Refine the host's `active` flags with the provider of the FOCUSED session
+ * (the composer's own state), so a session switch re-highlights instantly
+ * even though the host only tracks the last explicit selection. Returns the
+ * same object when nothing changes; `undefined` provider leaves the host's
+ * flags untouched.
+ */
+function applyActiveProvider(data: UsageListResult, provider: string | undefined): UsageListResult {
+  if (provider === undefined || !Array.isArray(data.providers)) return data
+  let changed = false
+  const providers = data.providers.map((entry) => {
+    const active = entry.id === provider
+    if (active === entry.active) return entry
+    changed = true
+    return { ...entry, active }
+  })
+  return changed ? { ...data, providers } : data
 }
 
 /* ------------------------------------------------------------------ *
@@ -457,7 +562,7 @@ function HomeIcon() {
   )
 }
 
-export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
+export default function UsageAction({ t, fetchUsage, getActiveProvider, subscribeActiveChange }: UsageActionProps) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<UsageListResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -476,6 +581,9 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
   const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
   /** Transient ball position while dragging (cursor-centered); null when docked. */
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
+  /** User-resized panel height in px; null = auto-size to content (max-height
+      + scroll). Persisted, like every other panel preference. */
+  const [panelHeight, setPanelHeight] = useState<number | null>(() => readStoredPanelHeight())
 
   // Follow the harness language by default: probe the shell-injected
   // translator with a known key, then let a panel-level override win.
@@ -504,6 +612,11 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; dragging: boolean } | null>(null)
   /** Set when a drag ends so the trailing click does not toggle the panel. */
   const suppressClickRef = useRef(false)
+  /** Active panel-height drag; cleared on pointerup/pointercancel. */
+  const resizeRef = useRef<{ pointerId: number; startY: number; startHeight: number; current: number } | null>(null)
+  /** Resize bounds snapshotted at drag start from the live layout: min = first
+      provider card fully visible, max = content height (no scroll, no blank). */
+  const resizeLimitsRef = useRef<{ min: number; max: number } | null>(null)
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return
@@ -511,7 +624,9 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     setLoading(true)
     try {
       const result = await fetchUsage()
-      setData(result)
+      // Refine "in use" with the focused session's provider (the host only
+      // tracks the last explicit composer selection).
+      setData(applyActiveProvider(result, getActiveProvider?.()))
       setError(null)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -519,7 +634,7 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
       inFlight.current = false
       setLoading(false)
     }
-  }, [fetchUsage])
+  }, [fetchUsage, getActiveProvider])
 
   // Initial fetch + fixed-interval polling; skip ticks while the tab is hidden.
   useEffect(() => {
@@ -552,6 +667,20 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
+
+  // Follow the FOCUSED session: when it switches (or its model selection
+  // changes), re-derive which provider is "in use" immediately — the host's
+  // global-default flag would otherwise stay stale until the next poll. Falls
+  // back to the host flag when no live client state is available.
+  useEffect(() => {
+    const unsubscribe = subscribeActiveChange?.(() => {
+      setData((prev) => (prev === null ? prev : applyActiveProvider(prev, getActiveProvider?.())))
+    })
+    return unsubscribe
+    // The subscription callbacks are stable closures created once by the
+    // client half; re-subscribing on prop identity churn is not needed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Slow tick so reset countdowns advance while the panel is open.
   useEffect(() => {
@@ -596,6 +725,17 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [open, pinnedPos, viewport])
+
+  // Keep a persisted height honest while open: never render taller than the
+  // current content (no blank strip at the bottom when providers vanish) or
+  // the viewport. Runs before paint, so no flash; a no-op during a drag.
+  useLayoutEffect(() => {
+    const panel = panelRef.current
+    if (panel === null || panelHeight === null) return
+    const clamped = Math.min(panelHeight, panelContentHeight(panel), panelMaxHeight())
+    if (clamped !== panelHeight) setPanelHeight(clamped)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelHeight, data, open])
 
   // Track the viewport: fraction-based positions and the default dock follow
   // window resizes automatically.
@@ -665,6 +805,46 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
     setDragPos(null)
   }
 
+  /* Panel height resize: grab the top-edge handle, drag up to grow / down to
+     shrink. The panel itself never moves — the anchored edge stays put, only
+     the height changes. The drag is bounded at drag start: growing stops at
+     the content height (no scroll, no blank strip), shrinking stops once the
+     first provider card is fully visible. */
+  const onResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const panel = panelRef.current
+    const rect = panel?.getBoundingClientRect()
+    const startHeight = panelHeight ?? Math.round(rect?.height ?? 0)
+    if (panel !== null) {
+      const viewportMax = panelMaxHeight()
+      const max = Math.min(panelContentHeight(panel), viewportMax)
+      const min = Math.min(Math.max(firstCardMinHeight(panel), PANEL_MIN_H), max)
+      resizeLimitsRef.current = { min, max }
+    } else {
+      resizeLimitsRef.current = { min: PANEL_MIN_H, max: panelMaxHeight() }
+    }
+    resizeRef.current = { pointerId: event.pointerId, startY: event.clientY, startHeight, current: startHeight }
+  }
+
+  const onResizePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const resize = resizeRef.current
+    if (resize === null || resize.pointerId !== event.pointerId) return
+    const limits = resizeLimitsRef.current
+    const next = limits === null
+      ? resize.startHeight + (resize.startY - event.clientY)
+      : Math.min(Math.max(resize.startHeight + (resize.startY - event.clientY), limits.min), limits.max)
+    resize.current = next
+    setPanelHeight(next)
+  }
+
+  const endResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const resize = resizeRef.current
+    if (resize === null || resize.pointerId !== event.pointerId) return
+    resizeRef.current = null
+    resizeLimitsRef.current = null
+    storePanelHeight(resize.current)
+  }
+
   const onBallClick = () => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false
@@ -710,9 +890,23 @@ export default function UsageAction({ t, fetchUsage }: UsageActionProps) {
             className="dsh-usage-panel"
             role="dialog"
             aria-label={tt('panel.title')}
-            style={{ left: panelPos.left, top: panelPos.top, bottom: panelPos.bottom }}
+            style={{
+              left: panelPos.left,
+              top: panelPos.top,
+              bottom: panelPos.bottom,
+              ...(panelHeight !== null ? { height: Math.min(panelHeight, panelMaxHeight()), maxHeight: 'none' } : {}),
+            }}
             onKeyDown={onKeyDown}
           >
+          <div
+            className="dsh-usage-resize"
+            title={tt('panel.resize')}
+            aria-label={tt('panel.resize')}
+            onPointerDown={onResizePointerDown}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+          />
           <div className="dsh-usage-head">
             <span className="dsh-usage-title">{tt('panel.title')}</span>
             {data?.version ? <span className="dsh-usage-version">v{data.version}</span> : null}
