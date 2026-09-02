@@ -1,6 +1,6 @@
 {
   "name": "dsh-provider-usage",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "DeepSeek Harness plugin: live account balance/usage panel for every configured LLM provider (draggable floating-ball widget, configurable refresh interval and balance thresholds)",
   "type": "module",
   "main": "lib/index.js",
