@@ -18,6 +18,9 @@ const CSS = `
    tone halo stacks on top. */
 .dsh-usage-ball {
   position: fixed; z-index: 999; width: 32px; height: 32px; border-radius: 50%;
+  /* The shell's theme opts every element into squircle corners
+     (corner-shape: superellipse) under @supports; a ball must stay round. */
+  corner-shape: round;
   cursor: pointer; touch-action: none;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--dsw-alias-border-l2);
