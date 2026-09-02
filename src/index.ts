@@ -164,6 +164,12 @@ export const Config = z.object({
   balanceYellowThreshold: z.number().step(0.01).min(0).default(30),
   /** Enumerate live provider routes from the llm registry. */
   autoDetect: z.boolean().default(true),
+  /** Per-attempt query timeout in milliseconds; each retry gets a fresh timeout. */
+  queryTimeoutMs: z.number().step(1).min(1000).max(120000).default(20000),
+  /** Retries after the first failed attempt for transient errors (timeout, network, HTTP 408/425/429/5xx). */
+  queryRetries: z.number().step(1).min(0).max(10).default(2),
+  /** Base delay between retries in milliseconds; doubles each attempt, capped at 10s. */
+  queryRetryDelayMs: z.number().step(1).min(100).max(60000).default(2000),
   /** Manual provider specs; an id matching a detected route overrides it. */
   providers: z.array(ProviderSpec).default([]),
 })
@@ -173,6 +179,9 @@ export interface ProviderUsageConfig {
   balanceRedThreshold: number
   balanceYellowThreshold: number
   autoDetect: boolean
+  queryTimeoutMs: number
+  queryRetries: number
+  queryRetryDelayMs: number
   providers: Array<{
     id: string
     kind: ProviderKind
@@ -394,6 +403,38 @@ async function fetchJson(url: string, apiKey: string, signal: AbortSignal, extra
 
 function okView(base: Omit<ProviderUsageView, 'status' | 'message'>): ProviderUsageView {
   return { ...base, status: 'ok', message: null }
+}
+
+/** Retryable HTTP statuses below 500 (the whole 5xx range is retryable). */
+const TRANSIENT_HTTP_STATUS = new Set([408, 425, 429])
+
+/**
+ * Whether a failed provider query is worth retrying: per-attempt timeouts,
+ * undici network failures, HTTP 408/425/429/5xx (including OAuth refresh
+ * failures carrying `(HTTP <status>)`), and transient socket text. Permanent
+ * 4xx (400/401/403/404/422, e.g. a model-unsupported or invalid_grant reply)
+ * and adapter-side data errors fail immediately.
+ */
+function isTransientQueryError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.name === 'TimeoutError' || error.name === 'AbortError') return true
+  const status = Number(/HTTP (\d+)/.exec(error.message)?.[1] ?? NaN)
+  if (Number.isFinite(status)) return status >= 500 || TRANSIENT_HTTP_STATUS.has(status)
+  if (error instanceof TypeError) return true
+  return /\b(?:fetch failed|ECONN[A-Z]+|ETIMEDOUT|EAI_AGAIN|socket hang up|other side closed|premature close)\b/i.test(error.message)
+}
+
+/** Delay that resolves early (without throwing) when the outer signal aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms)
+    function done() {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolve()
+    }
+    signal?.addEventListener('abort', done, { once: true })
+  })
 }
 
 function failView(id: string, displayName: string, kind: ProviderUsageView['kind'], status: ProviderUsageView['status'], message: string, active: boolean): ProviderUsageView {
@@ -973,34 +1014,45 @@ export class UsageService extends TypertRemoteService {
     const active = spec.id === activeProviderId
     const adapter = ADAPTERS[spec.kind]
     const base = { id: spec.id, displayName: spec.displayName, kind: adapter.view, balances: null, usages: null, active }
-    const signal = AbortSignal.any([AbortSignal.timeout(20000), ...(outerSignal ? [outerSignal] : [])])
-    try {
-      let apiKey: string
-      let refresh: RefreshFn | undefined
-      if (spec.kind === 'openai-codex' && spec.apiKeyEnv === undefined) {
-        refresh = async (refreshSignal) => {
-          const grant = await this.resolveOpenAiCodexGrant(refreshSignal)
-          if (grant === undefined) throw new Error('OpenAI Codex OAuth authorization missing')
-          return grant.access
+    const options = this.options()
+    const maxAttempts = options.queryRetries + 1
+    // Each attempt gets a fresh per-attempt timeout fused with the caller's
+    // signal; transient failures (timeout / network / HTTP 408/425/429/5xx)
+    // back off exponentially, permanent errors fail immediately.
+    for (let attempt = 1; ; attempt++) {
+      const signal = AbortSignal.any([AbortSignal.timeout(options.queryTimeoutMs), ...(outerSignal ? [outerSignal] : [])])
+      try {
+        let apiKey: string
+        let refresh: RefreshFn | undefined
+        if (spec.kind === 'openai-codex' && spec.apiKeyEnv === undefined) {
+          refresh = async (refreshSignal) => {
+            const grant = await this.resolveOpenAiCodexGrant(refreshSignal)
+            if (grant === undefined) throw new Error('OpenAI Codex OAuth authorization missing')
+            return grant.access
+          }
+          const grant = await this.resolveOpenAiCodexGrant(signal)
+          if (grant === undefined) {
+            return failView(spec.id, spec.displayName, adapter.view, 'missing-authorization', 'llm-pi-ai/openai-codex', active)
+          }
+          apiKey = grant.access
+        } else {
+          const resolved = await this.resolveApiKey(spec.apiKeyEnv!)
+          if (resolved === undefined) {
+            return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', spec.apiKeyEnv!, active)
+          }
+          apiKey = resolved
         }
-        const grant = await this.resolveOpenAiCodexGrant(signal)
-        if (grant === undefined) {
-          return failView(spec.id, spec.displayName, adapter.view, 'missing-authorization', 'llm-pi-ai/openai-codex', active)
+        const payload = await adapter.fetch(spec.baseURL, apiKey, signal, refresh)
+        return okView({ ...base, ...payload })
+      } catch (error) {
+        if (outerSignal?.aborted) throw error
+        const message = error instanceof Error ? error.message : String(error)
+        if (attempt >= maxAttempts || !isTransientQueryError(error)) {
+          return failView(spec.id, spec.displayName, adapter.view, 'error', message, active)
         }
-        apiKey = grant.access
-      } else {
-        const resolved = await this.resolveApiKey(spec.apiKeyEnv!)
-        if (resolved === undefined) {
-          return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', spec.apiKeyEnv!, active)
-        }
-        apiKey = resolved
+        const delayMs = Math.min(options.queryRetryDelayMs * 2 ** (attempt - 1), 10000)
+        await sleep(delayMs, outerSignal)
       }
-      const payload = await adapter.fetch(spec.baseURL, apiKey, signal, refresh)
-      return okView({ ...base, ...payload })
-    } catch (error) {
-      if (outerSignal?.aborted) throw error
-      const message = error instanceof Error ? error.message : String(error)
-      return failView(spec.id, spec.displayName, adapter.view, 'error', message, active)
     }
   }
 }

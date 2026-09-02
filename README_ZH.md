@@ -167,6 +167,9 @@ dsh plugin --profile web add dsh-provider-usage@latest
     balanceRedThreshold: 10     # 余额低于该值变红（按余额自身币种比较）
     balanceYellowThreshold: 30  # 余额低于该值变黄（按余额自身币种比较）
     autoDetect: true            # 自动枚举 llm 注册表中的 provider
+    queryTimeoutMs: 20000       # 单次查询超时（毫秒），每次重试独立计时
+    queryRetries: 2             # 瞬时错误（超时/网络/HTTP 408/425/429/5xx）重试次数
+    queryRetryDelayMs: 2000     # 重试基础延迟（毫秒），逐次翻倍，封顶 10 秒
     providers: []               # 手动补充/覆盖 provider（id 相同则覆盖自动探测结果）
 ```
 
@@ -176,6 +179,9 @@ dsh plugin --profile web add dsh-provider-usage@latest
 | `balanceRedThreshold` | number | `10` | 余额低于该值变红，按余额自身币种比较 |
 | `balanceYellowThreshold` | number | `30` | 余额低于该值变黄，按余额自身币种比较 |
 | `autoDetect` | boolean | `true` | 从 llm 注册表自动枚举 provider |
+| `queryTimeoutMs` | number | `20000` | 单次查询超时（毫秒），1000–120000，每次重试独立计时 |
+| `queryRetries` | number | `2` | 瞬时错误（超时/网络/HTTP 408/425/429/5xx）的重试次数，0–10；4xx 永久错误不重试 |
+| `queryRetryDelayMs` | number | `2000` | 重试基础延迟（毫秒），100–60000，指数翻倍，封顶 10 秒 |
 | `providers` | array | `[]` | 手动 provider 规格：`{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`，`kind` 取上表中的任一适配器 |
 
 也可以在 `~/.dsh/settings.yaml` 中通过 `provider-usage:` 命名空间热更新同样字段。

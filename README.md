@@ -167,6 +167,9 @@ Defaults work out of the box: the plugin auto-detects every provider route of th
     balanceRedThreshold: 10     # balance below this turns red (per the balance's own currency)
     balanceYellowThreshold: 30  # balance below this turns yellow (per the balance's own currency)
     autoDetect: true            # enumerate provider routes from the llm registry
+    queryTimeoutMs: 20000       # per-attempt query timeout; each retry gets a fresh timeout
+    queryRetries: 2             # retries for transient errors (timeout/network/HTTP 408/425/429/5xx)
+    queryRetryDelayMs: 2000     # base retry delay, doubled per attempt, capped at 10s
     providers: []               # manual specs; an id matching a detected route overrides it
 ```
 
@@ -176,6 +179,9 @@ Defaults work out of the box: the plugin auto-detects every provider route of th
 | `balanceRedThreshold` | number | `10` | Balance below this amount turns red, compared in the balance's own currency |
 | `balanceYellowThreshold` | number | `30` | Balance below this amount turns yellow, compared in the balance's own currency |
 | `autoDetect` | boolean | `true` | Enumerate live provider routes from the llm registry |
+| `queryTimeoutMs` | number | `20000` | Per-attempt query timeout (1000–120000); each retry gets a fresh timeout |
+| `queryRetries` | number | `2` | Retries for transient errors — timeout / network / HTTP 408, 425, 429, 5xx (0–10); permanent 4xx errors fail immediately |
+| `queryRetryDelayMs` | number | `2000` | Base delay between retries (100–60000), doubled per attempt, capped at 10s |
 | `providers` | array | `[]` | Manual provider specs: `{id, kind, baseURL, apiKeyEnv, displayName?, enabled?}`; `kind` is one of the adapter table above |
 
 The same fields can be hot-updated under the `provider-usage:` namespace in `~/.dsh/settings.yaml`.
