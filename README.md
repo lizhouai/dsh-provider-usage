@@ -90,6 +90,37 @@ That's it. The route is auto-detected (`ctx.llm` lists `openai-codex`), and the 
 
 The panel then shows your subscription's **5h limit**, **weekly** windows (used %, reset countdown) plus **credits** and **spend control** balances when the plan reports them. If the grant is missing the card reads "OAuth authorization missing (llm-pi-ai/openai-codex)" — sign in again with step 2.
 
+### 4. Troubleshooting: intermittent "Our servers are currently overloaded"
+
+The Codex backend occasionally answers with `Codex error: Our servers are currently overloaded. Please try again later.`, and the harness fails the round with `PI_AI_ERROR`. This is **transient overload on OpenAI's side** (account, quota, and network are usually fine — `GET /wham/usage` confirms window headroom), yet the default configuration never retries, for two reasons:
+
+1. pi-ai's Codex client recognizes `overloaded` as retryable, but its default retry count is 0 (`dsh-llm-pi-ai` explicitly passes `maxRetries: 0`);
+2. once the error bubbles up, its text contains no `5xx` / `rate limit` / `timeout` keyword, so it is classified as the catch-all `PI_AI_ERROR` — which is **not** among `dsh-llm-retry`'s default retryable codes (`EMPTY_RESPONSE` / `RATE_LIMIT` / `SERVER` / `TIMEOUT` / `TRANSPORT`), so the round fails immediately.
+
+Add a `retryPolicy` for this provider in `~/.dsh/settings.yaml` that includes `PI_AI_ERROR` in the retryable codes (takes effect on a new session):
+
+```yaml
+llm-pi-ai:
+  providers:
+    openai-codex:
+      retryPolicy:
+        mode: normal
+        maxRetries: 10
+        retryableCodes:
+          - EMPTY_RESPONSE
+          - RATE_LIMIT
+          - SERVER
+          - TIMEOUT
+          - TRANSPORT
+          - PI_AI_ERROR
+        backoff:
+          initialDelayMs: 2000   # first retry delay, doubled each attempt
+          maxDelayMs: 60000      # per-attempt delay cap
+          jitterRatio: 0.2       # ±20% jitter
+```
+
+Do not confuse this with the other, **deterministic** failure: some models are unavailable to ChatGPT-subscription accounts, and the backend answers `400 The '<model>' model is not supported when using Codex with a ChatGPT account.` (observed with e.g. `gpt-5.3-codex-spark`, `gpt-5-codex`). That is a permanent error — retrying won't help; switch to a model your account supports (e.g. the `gpt-5.4` / `gpt-5.5` / `gpt-5.6` families).
+
 ## Install
 
 > [!NOTE]

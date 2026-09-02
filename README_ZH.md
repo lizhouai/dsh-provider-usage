@@ -90,6 +90,37 @@ records:
 
 面板随即展示订阅的 **5h 上限**、**每周**窗口（已用百分比 + 重置倒计时），以及计划上报的 **credits** 与 **spend control** 余额。若授权记录缺失，卡片会显示「未完成 OAuth 授权（llm-pi-ai/openai-codex）」，按第 2 步重新登录即可。
 
+### 4. 故障排除：间歇性 "Our servers are currently overloaded"
+
+Codex 后端偶尔会返回 `Codex error: Our servers are currently overloaded. Please try again later.`，harness 随即以 `PI_AI_ERROR` 判本轮失败。这是 **OpenAI 端的间歇性过载**（账号、配额、网络通常都正常——可用 `GET /wham/usage` 确认窗口余量），但默认配置下不会自动重试，原因有两层：
+
+1. pi-ai 的 Codex 客户端内部认得 `overloaded` 是可重试错误，但默认重试次数为 0（`dsh-llm-pi-ai` 显式传 `maxRetries: 0`）；
+2. 错误冒泡后，其文本不含 `5xx` / `rate limit` / `timeout` 等关键词，被归类为兜底的 `PI_AI_ERROR`——而它**不在** `dsh-llm-retry` 的默认可重试码（`EMPTY_RESPONSE` / `RATE_LIMIT` / `SERVER` / `TIMEOUT` / `TRANSPORT`）里，于是整轮直接失败。
+
+在 `~/.dsh/settings.yaml` 中给该 provider 加一段 `retryPolicy`，把 `PI_AI_ERROR` 纳入可重试码即可（重开 session 后生效）：
+
+```yaml
+llm-pi-ai:
+  providers:
+    openai-codex:
+      retryPolicy:
+        mode: normal
+        maxRetries: 10
+        retryableCodes:
+          - EMPTY_RESPONSE
+          - RATE_LIMIT
+          - SERVER
+          - TIMEOUT
+          - TRANSPORT
+          - PI_AI_ERROR
+        backoff:
+          initialDelayMs: 2000   # 首次重试延迟，指数翻倍
+          maxDelayMs: 60000      # 单次延迟上限
+          jitterRatio: 0.2       # ±20% 抖动
+```
+
+注意区分另一类**必然失败**：部分模型对 ChatGPT 订阅账号不可用，后端直接返回 `400 The '<model>' model is not supported when using Codex with a ChatGPT account.`（实测如 `gpt-5.3-codex-spark`、`gpt-5-codex`）。这类是永久错误，重试无效——请换用账号支持的模型（如 `gpt-5.4` / `gpt-5.5` / `gpt-5.6` 系列）。
+
 ## 安装
 
 > [!NOTE]
