@@ -34,7 +34,7 @@ interface ProviderUsageView {
   id: string
   displayName: string
   kind: 'balance' | 'usage' | null
-  status: 'ok' | 'error' | 'missing-credential' | 'missing-authorization' | 'unsupported'
+  status: 'ok' | 'error' | 'missing-credential' | 'missing-authorization' | 'reauth-required' | 'unsupported'
   message: string | null
   balances: BalanceRow[] | null
   usages: UsageRow[] | null
@@ -394,7 +394,7 @@ function healthTone(data: UsageListResult | null, error: string | null, red: num
   const relevant = active.length > 0 ? active : providers
   let tone: 'ok' | 'warn' | 'danger' = 'ok'
   for (const provider of relevant) {
-    if (provider.status === 'error' || provider.status === 'missing-credential' || provider.status === 'missing-authorization') return 'danger'
+    if (provider.status === 'error' || provider.status === 'missing-credential' || provider.status === 'missing-authorization' || provider.status === 'reauth-required') return 'danger'
     const providerToneValue = providerTone(provider, red, yellow)
     if (providerToneValue === 'danger') return 'danger'
     if (providerToneValue === 'warn') tone = 'warn'
@@ -489,6 +489,8 @@ function ProviderCard({ provider, now, red, yellow, t }: { provider: ProviderUsa
         <span className="dsh-usage-message">{t('status.missingCredential', { ref: provider.message })}</span>
       ) : provider.status === 'missing-authorization' ? (
         <span className="dsh-usage-message">{t('status.missingAuthorization', { key: provider.message })}</span>
+      ) : provider.status === 'reauth-required' ? (
+        <span className="dsh-usage-message" title={provider.message ?? undefined}>{t('status.reauthRequired')}</span>
       ) : provider.status === 'error' ? (
         <span className="dsh-usage-message">{t('status.error')}: {provider.message}</span>
       ) : provider.kind === 'balance' ? (

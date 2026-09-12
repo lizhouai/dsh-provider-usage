@@ -54,6 +54,7 @@ jobs:
       - name: Build and verify package
         run: |
           pnpm typecheck
+          pnpm test
           pnpm build
           npm pack --dry-run --ignore-scripts
 

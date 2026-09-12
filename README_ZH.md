@@ -85,10 +85,10 @@ records:
 配置完成。路由会被自动探测（`ctx.llm` 会列出 `openai-codex`），插件会：
 
 1. 每次轮询都从凭据库**实时读取**授权记录（不缓存）；
-2. access token 距过期不足 30 秒时**自动刷新** OAuth 令牌（并通过凭据库带锁的 `modifyRecord` 回写旋转后的授权）；
+2. access token 距过期不足 30 秒时**自动刷新** OAuth 令牌，且**判断与轮换都发生在凭据库的排他锁内**——并发进程已经轮换过就复用它，不会把同一枚一次性 refresh token 花掉两次；回写失败会**报错**而不是被静默吞掉；
 3. 用 `Authorization: Bearer <access>` + 从令牌 JWT 中解析出的 `ChatGPT-Account-Id` 头请求 `GET https://chatgpt.com/backend-api/wham/usage`；若返回 `401` 会自动刷新一次并重试。
 
-面板随即展示订阅的 **5h 上限**、**每周**窗口（已用百分比 + 重置倒计时），以及计划上报的 **credits** 与 **spend control** 余额。若授权记录缺失，卡片会显示「未完成 OAuth 授权（llm-pi-ai/openai-codex）」，按第 2 步重新登录即可。
+面板随即展示订阅的 **5h 上限**、**每周**窗口（已用百分比 + 重置倒计时），以及计划上报的 **credits** 与 **spend control** 余额。若授权记录缺失，卡片会显示「未完成 OAuth 授权（llm-pi-ai/openai-codex）」，按第 2 步重新登录即可。若上游**拒绝**了记录里的 refresh token（`refresh_token_reused` / `invalid_grant`，即这枚 token 已被消费或撤销、而那次轮换没能落到本地），卡片会显示「OAuth 授权已失效，需重新登录 Codex」（悬停可看上游原始报错），并且插件在十分钟内不再反复请求令牌端点，而不是每轮轮询都撞一次。
 
 ### 4. 故障排除：间歇性 "Our servers are currently overloaded"
 

@@ -85,10 +85,10 @@ records:
 That's it. The route is auto-detected (`ctx.llm` lists `openai-codex`), and the plugin:
 
 1. reads the grant record from the credential store on every poll (no caching),
-2. refreshes the OAuth token automatically when it is within 30 s of expiry (and persists the rotated grant back through the store's locked `modifyRecord`),
+2. refreshes the OAuth token automatically when it is within 30 s of expiry, deciding **and** rotating inside the store's exclusive lock — so a concurrent process that already rotated the grant is adopted instead of spending the same single-use refresh token twice, and a write that fails is reported rather than swallowed,
 3. calls `GET https://chatgpt.com/backend-api/wham/usage` with `Authorization: Bearer <access>` and the `ChatGPT-Account-Id` header derived from the token's own JWT claim, retrying once after a refresh if the endpoint answers `401`.
 
-The panel then shows your subscription's **5h limit**, **weekly** windows (used %, reset countdown) plus **credits** and **spend control** balances when the plan reports them. If the grant is missing the card reads "OAuth authorization missing (llm-pi-ai/openai-codex)" — sign in again with step 2.
+The panel then shows your subscription's **5h limit**, **weekly** windows (used %, reset countdown) plus **credits** and **spend control** balances when the plan reports them. If the grant is missing the card reads "OAuth authorization missing (llm-pi-ai/openai-codex)" — sign in again with step 2. If upstream instead *rejects* the stored refresh token (`refresh_token_reused` / `invalid_grant`, i.e. the token was already spent or revoked and the rotation never landed here), the card reads "OAuth authorization expired — sign in to Codex again" with the raw upstream detail on hover, and the plugin stops calling the token endpoint for ten minutes instead of once per poll.
 
 ### 4. Troubleshooting: intermittent "Our servers are currently overloaded"
 

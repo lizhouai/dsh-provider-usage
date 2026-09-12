@@ -34,11 +34,12 @@ import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import {
+  OpenAiCodexReauthRequiredError,
   openAiCodexAccountId,
-  openAiCodexGrantNeedsRefresh,
   parseOpenAiCodexGrant,
-  refreshOpenAiCodexGrant,
+  resolveOpenAiCodexGrant,
   type OpenAiCodexGrant,
+  type OpenAiCodexGrantStore,
 } from './openai-codex'
 
 export const name = 'provider-usage'
@@ -76,7 +77,7 @@ export interface ProviderUsageView {
   id: string
   displayName: string
   kind: 'balance' | 'usage' | null
-  status: 'ok' | 'error' | 'missing-credential' | 'missing-authorization' | 'unsupported'
+  status: 'ok' | 'error' | 'missing-credential' | 'missing-authorization' | 'reauth-required' | 'unsupported'
   message: string | null
   balances: BalanceRow[] | null
   usages: UsageRow[] | null
@@ -407,6 +408,13 @@ function okView(base: Omit<ProviderUsageView, 'status' | 'message'>): ProviderUs
 
 /** Retryable HTTP statuses below 500 (the whole 5xx range is retryable). */
 const TRANSIENT_HTTP_STATUS = new Set([408, 425, 429])
+
+/**
+ * How long a "the stored Codex grant needs a new sign-in" verdict suppresses
+ * further token-endpoint calls. Long enough to stop a poll loop from hammering
+ * a dead grant, short enough to recover on its own from a misdiagnosis.
+ */
+const CODEX_REAUTH_BACKOFF_MS = 10 * 60_000
 
 /**
  * Whether a failed provider query is worth retrying: per-attempt timeouts,
@@ -867,6 +875,13 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
 export class UsageService extends TypertRemoteService {
   private readonly options: () => ProviderUsageConfig
 
+  /**
+   * Latched when upstream refuses the stored Codex refresh token. Keyed by the
+   * dead token so a new authorization clears it with nothing to reset, and
+   * time-boxed so a repaired credential is picked up even without a re-login.
+   */
+  private codexReauth: { refreshToken: string; message: string; until: number } | undefined
+
   constructor(ctx: Context, options: () => ProviderUsageConfig) {
     super(ctx, 'usage')
     this.options = options
@@ -983,28 +998,44 @@ export class UsageService extends TypertRemoteService {
     return undefined
   }
 
-  /** Resolve the Codex OAuth grant from the harness credential records,
-      refreshing it when close to expiry (and persisting the rotated grant). */
+  /**
+   * Resolve the Codex OAuth grant from the harness credential records,
+   * refreshing it when close to expiry. The rotation itself runs inside the
+   * credential store's exclusive lock (see {@link resolveOpenAiCodexGrant}),
+   * and a grant upstream has already invalidated latches a re-auth verdict so
+   * later polls report "sign in again" instead of spending a doomed round trip
+   * on the token endpoint every interval.
+   */
   private async resolveOpenAiCodexGrant(signal: AbortSignal): Promise<OpenAiCodexGrant | undefined> {
-    const credentials = this.ctx.get('credentials') as
-      | {
-          readRecord(key: string): Promise<CredentialRecord | undefined>
-          modifyRecord(key: string, mutate: (current: CredentialRecord | undefined) => Promise<CredentialRecord | undefined>): Promise<CredentialRecord | undefined>
-        }
-      | undefined
+    const credentials = this.ctx.get('credentials') as OpenAiCodexGrantStore<CredentialRecord> | undefined
     if (credentials === undefined) return undefined
-    const record = await credentials.readRecord(credentialKey('llm-pi-ai', 'openai-codex'))
-    if (record === undefined) return undefined
-    const current = record.kind === 'grant' ? parseOpenAiCodexGrant(record.payload) : null
-    if (current === null) return undefined
-    if (!openAiCodexGrantNeedsRefresh(current)) return current
-    const refreshed = await refreshOpenAiCodexGrant(current.refresh, signal)
-    await credentials
-      .modifyRecord(credentialKey('llm-pi-ai', 'openai-codex'), async (existing: CredentialRecord | undefined) =>
-        existing === undefined ? existing : { kind: 'grant', payload: refreshed },
-      )
-      .catch(() => {})
-    return refreshed
+    const key: string = credentialKey('llm-pi-ai', 'openai-codex')
+
+    const latched = this.codexReauth
+    if (latched !== undefined) {
+      // Re-check against the live record: a new sign-in stores a different
+      // refresh token, which is the whole signal that the latch is obsolete.
+      const record = await credentials.readRecord(key)
+      const current = record === undefined || record.kind !== 'grant' ? null : parseOpenAiCodexGrant(record.payload)
+      if (current !== null && current.refresh === latched.refreshToken && Date.now() < latched.until) {
+        throw new OpenAiCodexReauthRequiredError(latched.message, latched.refreshToken)
+      }
+      this.codexReauth = undefined
+    }
+
+    try {
+      const toRecord = (grant: OpenAiCodexGrant): CredentialRecord => ({ kind: 'grant', payload: grant })
+      return await resolveOpenAiCodexGrant(credentials, key, toRecord, signal)
+    } catch (error) {
+      if (error instanceof OpenAiCodexReauthRequiredError) {
+        this.codexReauth = {
+          refreshToken: error.refreshToken,
+          message: error.message,
+          until: Date.now() + CODEX_REAUTH_BACKOFF_MS,
+        }
+      }
+      throw error
+    }
   }
 
   private async fetchProvider(spec: DetectedProvider, activeProviderId: string | null, outerSignal?: AbortSignal): Promise<ProviderUsageView> {
@@ -1025,16 +1056,23 @@ export class UsageService extends TypertRemoteService {
         let apiKey: string
         let refresh: RefreshFn | undefined
         if (spec.kind === 'openai-codex' && spec.apiKeyEnv === undefined) {
+          // One resolution per attempt, shared by the quota call and the
+          // adapter's post-401 retry: a second refresh built on the same
+          // single-use refresh token is rejected upstream as
+          // `refresh_token_reused`, which is exactly the failure this closes.
+          // The adapter passes the same attempt signal it was given.
+          let resolved: Promise<OpenAiCodexGrant | undefined> | undefined
+          const grant = (): Promise<OpenAiCodexGrant | undefined> => (resolved ??= this.resolveOpenAiCodexGrant(signal))
           refresh = async (refreshSignal) => {
-            const grant = await this.resolveOpenAiCodexGrant(refreshSignal)
-            if (grant === undefined) throw new Error('OpenAI Codex OAuth authorization missing')
-            return grant.access
+            const current = await (refreshSignal === signal ? grant() : this.resolveOpenAiCodexGrant(refreshSignal))
+            if (current === undefined) throw new Error('OpenAI Codex OAuth authorization missing')
+            return current.access
           }
-          const grant = await this.resolveOpenAiCodexGrant(signal)
-          if (grant === undefined) {
+          const current = await grant()
+          if (current === undefined) {
             return failView(spec.id, spec.displayName, adapter.view, 'missing-authorization', 'llm-pi-ai/openai-codex', active)
           }
-          apiKey = grant.access
+          apiKey = current.access
         } else {
           const resolved = await this.resolveApiKey(spec.apiKeyEnv!)
           if (resolved === undefined) {
@@ -1047,6 +1085,11 @@ export class UsageService extends TypertRemoteService {
       } catch (error) {
         if (outerSignal?.aborted) throw error
         const message = error instanceof Error ? error.message : String(error)
+        // An unrecoverable grant is its own state, not a query failure: report
+        // what a human must do, and never retry it into the token endpoint.
+        if (error instanceof OpenAiCodexReauthRequiredError) {
+          return failView(spec.id, spec.displayName, adapter.view, 'reauth-required', message, active)
+        }
         if (attempt >= maxAttempts || !isTransientQueryError(error)) {
           return failView(spec.id, spec.displayName, adapter.view, 'error', message, active)
         }
