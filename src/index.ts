@@ -23,6 +23,10 @@
  * - `opencode`       → GET {baseURL}/usage                     (Zen Go 订阅 5h/weekly/monthly)
  * - `vercel-ai-gateway` → GET {baseURL}/v1/credits             (团队 credit 余额)
  * - `xai`            → GET {baseURL}/billing/credits           (预付余额; Management API 见注释)
+ * - `volcengine-ark-agent`  → POST open.volcengineapi.com GetAFPUsage
+ *                     (火山方舟 Agent Plan 5h/weekly/monthly; IAM AK/SK V4 签名, 见 volcengine-ark.ts)
+ * - `volcengine-ark-coding` → POST open.volcengineapi.com GetCodingPlanUsage
+ *                     (火山方舟 Coding Plan session/weekly/monthly; 同一对 AK/SK)
  *
  * The browser widget polls `usage/list` on its own configurable interval, so
  * this service stays stateless: every call fetches live values.
@@ -40,7 +44,19 @@ import {
   resolveOpenAiCodexGrant,
   type OpenAiCodexGrant,
   type OpenAiCodexGrantStore,
-} from './openai-codex'
+} from './openai-codex.ts'
+import { orderUsageRows, toNumber, toResetAt, usageRow, type BalanceRow, type ProviderUsageView, type UsageListResult, type UsageRow } from './wire.ts'
+import {
+  ACCESS_KEY_REFS,
+  AGENT_PLAN_ACTIONS,
+  CODING_PLAN_ACTIONS,
+  SECRET_KEY_REFS,
+  parseAgentPlanUsage,
+  parseCodingPlanUsage,
+  volcengineSignedRequest,
+} from './volcengine-ark.ts'
+
+export type { BalanceRow, ProviderUsageView, UsageListResult, UsageRow } from './wire.ts'
 
 export const name = 'provider-usage'
 
@@ -50,54 +66,6 @@ export const version: string = typeof __PLUGIN_VERSION__ === 'undefined' ? '0.0.
 
 /** Settings namespace this plugin owns (registered through `ctx.settings`). */
 const NS = 'provider-usage'
-
-/* ------------------------------------------------------------------ *
- * Wire views (mirrored by the client bundle)
- * ------------------------------------------------------------------ */
-
-export interface BalanceRow {
-  currency: string
-  total: string
-  granted: string
-  toppedUp: string
-}
-
-export interface UsageRow {
-  /** 'weekly' is the sentinel for the overall weekly window; other labels come from the provider. */
-  label: string
-  used: number | null
-  limit: number | null
-  remaining: number | null
-  percent: number | null
-  /** ISO timestamp when the window resets, when the provider reports one. */
-  resetAt: string | null
-}
-
-export interface ProviderUsageView {
-  id: string
-  displayName: string
-  kind: 'balance' | 'usage' | null
-  status: 'ok' | 'error' | 'missing-credential' | 'missing-authorization' | 'reauth-required' | 'unsupported'
-  message: string | null
-  balances: BalanceRow[] | null
-  usages: UsageRow[] | null
-  /** True when this route is the harness's current default model selection —
-      the provider in use, which alone drives the widget's health tone. */
-  active: boolean
-}
-
-export interface UsageListResult {
-  fetchedAt: string
-  /** Deployment-suggested refresh interval; the widget may override it locally. */
-  refreshSeconds: number
-  /** Deployment-suggested balance thresholds (per the balance's own currency);
-      the panel may override them locally. */
-  balanceRedThreshold: number
-  balanceYellowThreshold: number
-  /** Plugin package version, surfaced in the panel header. */
-  version: string
-  providers: ProviderUsageView[]
-}
 
 /* ------------------------------------------------------------------ *
  * Provider kinds & adapters
@@ -117,6 +85,8 @@ const PROVIDER_KINDS = [
   'opencode',
   'vercel-ai-gateway',
   'xai',
+  'volcengine-ark-agent',
+  'volcengine-ark-coding',
 ] as const
 
 type ProviderKind = (typeof PROVIDER_KINDS)[number]
@@ -137,7 +107,15 @@ interface QuotaAdapter {
   match: RegExp
   /** Extra request headers beyond Authorization/Accept. */
   headers?: Record<string, string>
-  fetch(baseURL: string, apiKey: string, signal: AbortSignal, refresh?: RefreshFn): Promise<AdapterPayload>
+  /**
+   * Credential slots this adapter owns, each a list of candidate refs resolved
+   * in order (first hit wins). Present only where the endpoint is NOT
+   * authenticated by the route's own `apiKeyEnv` — the Volcengine plan RPCs
+   * sign with an IAM AK/SK pair rather than the route's data-plane Bearer key.
+   * Every slot must resolve; the values arrive as the `credentials` argument.
+   */
+  credentialRefs?: readonly (readonly string[])[]
+  fetch(baseURL: string, apiKey: string, signal: AbortSignal, refresh?: RefreshFn, credentials?: readonly string[]): Promise<AdapterPayload>
 }
 
 /* ------------------------------------------------------------------ *
@@ -252,6 +230,10 @@ const KNOWN_ROUTES: Record<string, { baseURL?: string; apiKeyEnv?: string; displ
   'github-copilot': { baseURL: 'https://api.individual.githubcopilot.com', apiKeyEnv: 'COPILOT_GITHUB_TOKEN', displayName: 'GitHub Copilot' },
   'vercel-ai-gateway': { baseURL: 'https://ai-gateway.vercel.sh', apiKeyEnv: 'AI_GATEWAY_API_KEY', displayName: 'Vercel AI Gateway' },
   'ant-ling': { baseURL: 'https://api.ant-ling.com/v1', apiKeyEnv: 'ANT_LING_API_KEY', displayName: 'Ant Ling' },
+  'ark-agent-plan': { baseURL: 'https://ark.cn-beijing.volces.com/api/plan', apiKeyEnv: 'ARK_AGENT_PLAN_API_KEY', displayName: 'Volcengine Ark Agent Plan' },
+  'ark-agent-plan-cn': { baseURL: 'https://ark.cn-beijing.volces.com/api/plan', apiKeyEnv: 'ARK_AGENT_PLAN_CN_API_KEY', displayName: 'Volcengine Ark Agent Plan' },
+  'ark-coding-plan': { baseURL: 'https://ark.cn-beijing.volces.com/api/coding', apiKeyEnv: 'ARK_CODING_PLAN_API_KEY', displayName: 'Volcengine Ark Coding Plan' },
+  'ark-coding-plan-cn': { baseURL: 'https://ark.cn-beijing.volces.com/api/coding', apiKeyEnv: 'ARK_CODING_PLAN_CN_API_KEY', displayName: 'Volcengine Ark Coding Plan' },
   minimax: { baseURL: 'https://api.minimax.io/anthropic', apiKeyEnv: 'MINIMAX_API_KEY', displayName: 'MiniMax' },
   'minimax-cn': { baseURL: 'https://api.minimaxi.com/anthropic', apiKeyEnv: 'MINIMAX_CN_API_KEY', displayName: 'MiniMax CN' },
   zai: { baseURL: 'https://api.z.ai/api/coding/paas/v4', apiKeyEnv: 'ZAI_API_KEY', displayName: 'Z.AI' },
@@ -278,63 +260,18 @@ function kindOfBaseURL(baseURL: string): ProviderKind | null {
   return null
 }
 
+/**
+ * Whether a kind authenticates from refs it declares itself rather than from
+ * the route's key. Such a route is worth listing even when the settings
+ * profile names no `apiKeyEnv`, because its credential is resolved elsewhere.
+ */
+function ownsCredentials(kind: ProviderKind): boolean {
+  return ADAPTERS[kind].credentialRefs !== undefined
+}
+
 /* ------------------------------------------------------------------ *
  * Response parsing helpers
  * ------------------------------------------------------------------ */
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
-
-function toResetAt(value: unknown): string | null {
-  const numeric = toNumber(value)
-  if (numeric !== null) {
-    // Epoch seconds vs milliseconds.
-    const ms = numeric > 1e12 ? numeric : numeric * 1000
-    const date = new Date(ms)
-    return Number.isNaN(date.getTime()) ? null : date.toISOString()
-  }
-  if (typeof value === 'string' && value !== '') {
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? null : date.toISOString()
-  }
-  return null
-}
-
-function usageRow(raw: any, fallbackLabel: string): UsageRow | null {
-  if (raw === null || typeof raw !== 'object') return null
-  const limit = toNumber(raw.limit ?? raw.limit_amount)
-  let used = toNumber(raw.used ?? raw.used_amount)
-  const remaining = toNumber(raw.remaining)
-  if (used === null && remaining !== null && limit !== null) used = limit - remaining
-  if (used === null && limit === null && remaining === null) return null
-  const resetAt = toResetAt(raw.resetTime ?? raw.reset_at ?? raw.reset_time)
-  const rem = remaining ?? (limit !== null && used !== null ? limit - used : null)
-  return {
-    label: String(raw.name ?? raw.title ?? raw.model_name ?? fallbackLabel),
-    used,
-    limit,
-    remaining: rem,
-    percent: limit !== null && limit > 0 && used !== null ? (used / limit) * 100 : null,
-    resetAt,
-  }
-}
-
-/**
- * Display priority for quota windows: the rolling 5h window comes first,
- * then the weekly window, then provider-ordered extras (stable sort).
- * Every adapter with a 5h/weekly pair (Kimi, Codex, MiniMax, z.ai,
- * OpenCode) renders in this order.
- */
-function orderUsageRows(rows: UsageRow[]): UsageRow[] {
-  const priority = (label: string) => (label === '5h limit' ? 0 : label === 'weekly' ? 1 : 2)
-  return rows.sort((a, b) => priority(a.label) - priority(b.label))
-}
 
 /** Parse the Kimi Code `/v1/usages` payload (both observed shapes). */
 function parseKimiUsages(payload: any): UsageRow[] {
@@ -376,7 +313,36 @@ function parseKimiUsages(payload: any): UsageRow[] {
  * HTTP
  * ------------------------------------------------------------------ */
 
-async function fetchJson(url: string, apiKey: string, signal: AbortSignal, extraHeaders: Record<string, string> = {}): Promise<any> {
+/**
+ * Best-effort human detail from a provider error body: Volcengine's OpenTOP
+ * `ResponseMetadata.Error` (whose `Code` carries the actionable part, e.g.
+ * `AccessDenied` or `InvalidAccessKey`), the OpenAI-shaped `error.message`,
+ * or a bare `message`/`msg`.
+ */
+function errorDetail(body: any): string | undefined {
+  const volc = body?.ResponseMetadata?.Error
+  if (volc !== null && typeof volc === 'object') {
+    const parts = [typeof volc.Code === 'string' ? volc.Code : undefined, typeof volc.Message === 'string' ? volc.Message : undefined]
+      .filter((part): part is string => part !== undefined && part !== '')
+    if (parts.length > 0) return parts.join(': ')
+  }
+  const detail = body?.error?.message ?? body?.message ?? body?.msg
+  return typeof detail === 'string' && detail !== '' ? detail : undefined
+}
+
+/**
+ * GET a JSON endpoint, or POST one when `init` says so (the signed Volcengine
+ * plan RPCs do).
+ * @param apiKey - the route credential; omit it when `extraHeaders` already
+ *   carries the authorization (signed requests, `x-api-key` adapters).
+ */
+async function fetchJson(
+  url: string,
+  apiKey: string | undefined,
+  signal: AbortSignal,
+  extraHeaders: Record<string, string> = {},
+  init: { method?: string; body?: string } = {},
+): Promise<any> {
   // Adapters with a non-Bearer credential (x-api-key, `token <oauth>`) pass it
   // through extraHeaders; only then is the default Bearer header withheld.
   const hasAuth = Object.keys(extraHeaders).some((h) => {
@@ -384,8 +350,9 @@ async function fetchJson(url: string, apiKey: string, signal: AbortSignal, extra
     return lower === 'authorization' || lower === 'x-api-key'
   })
   const response = await fetch(url, {
-    method: 'GET',
-    headers: { accept: 'application/json', ...(hasAuth ? {} : { authorization: `Bearer ${apiKey}` }), ...extraHeaders },
+    method: init.method ?? 'GET',
+    headers: { accept: 'application/json', ...(hasAuth || apiKey === undefined ? {} : { authorization: `Bearer ${apiKey}` }), ...extraHeaders },
+    ...(init.body === undefined ? {} : { body: init.body }),
     signal,
   })
   const text = await response.text()
@@ -396,10 +363,33 @@ async function fetchJson(url: string, apiKey: string, signal: AbortSignal, extra
     body = undefined
   }
   if (!response.ok) {
-    const detail = body?.error?.message ?? body?.message
-    throw new Error(`HTTP ${response.status}${typeof detail === 'string' ? `: ${detail}` : ''}`)
+    const detail = errorDetail(body)
+    throw new Error(`HTTP ${response.status}${detail === undefined ? '' : `: ${detail}`}`)
   }
   return body
+}
+
+/**
+ * POST one Volcengine plan RPC, retrying with an action alias only when the
+ * gateway does not know the primary name for this service version. The signed
+ * headers carry their own `Authorization`, so no Bearer key is attached.
+ */
+async function fetchVolcenginePlan(actions: readonly string[], credentials: readonly string[] | undefined, signal: AbortSignal): Promise<any> {
+  const [accessKeyId, secretKey] = credentials ?? []
+  // fetchProvider reports the missing pair before reaching an adapter; this
+  // guards the adapter against being driven directly.
+  if (accessKeyId === undefined || secretKey === undefined) throw new Error('Volcengine Ark plan quota needs an IAM AK/SK pair')
+  let lastError: unknown
+  for (const action of actions) {
+    const request = volcengineSignedRequest({ accessKeyId, secretKey, action })
+    try {
+      return await fetchJson(request.url, undefined, signal, request.headers, { method: 'POST', body: '{}' })
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('InvalidActionOrVersion')) throw error
+      lastError = error
+    }
+  }
+  throw lastError ?? new Error('Volcengine Ark plan quota request failed')
 }
 
 function okView(base: Omit<ProviderUsageView, 'status' | 'message'>): ProviderUsageView {
@@ -866,6 +856,28 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
       }
     },
   },
+
+  'volcengine-ark-agent': {
+    view: 'usage',
+    // The plan endpoint's own baseURL (`/api/plan`, with or without `/v3`);
+    // the quota itself is a signed control-plane call (see volcengine-ark.ts).
+    match: /volces\.com\/api\/plan/i,
+    credentialRefs: [ACCESS_KEY_REFS, SECRET_KEY_REFS],
+    async fetch(_baseURL, _apiKey, signal, _refresh, credentials) {
+      const body = await fetchVolcenginePlan(AGENT_PLAN_ACTIONS, credentials, signal)
+      return { balances: null, usages: parseAgentPlanUsage(body) }
+    },
+  },
+
+  'volcengine-ark-coding': {
+    view: 'usage',
+    match: /volces\.com\/api\/coding/i,
+    credentialRefs: [ACCESS_KEY_REFS, SECRET_KEY_REFS],
+    async fetch(_baseURL, _apiKey, signal, _refresh, credentials) {
+      const body = await fetchVolcenginePlan(CODING_PLAN_ACTIONS, credentials, signal)
+      return { balances: null, usages: parseCodingPlanUsage(body) }
+    },
+  },
 }
 
 /* ------------------------------------------------------------------ *
@@ -973,7 +985,7 @@ export class UsageService extends TypertRemoteService {
     }
     if (baseURL !== undefined) {
       const kind = kindOfBaseURL(baseURL)
-      if (kind !== null && (apiKeyEnv !== undefined || kind === 'openai-codex')) {
+      if (kind !== null && (apiKeyEnv !== undefined || kind === 'openai-codex' || ownsCredentials(kind))) {
         return {
           id: route.id,
           displayName: route.name || known?.displayName || route.id,
@@ -1055,7 +1067,28 @@ export class UsageService extends TypertRemoteService {
       try {
         let apiKey: string
         let refresh: RefreshFn | undefined
-        if (spec.kind === 'openai-codex' && spec.apiKeyEnv === undefined) {
+        let credentials: string[] | undefined
+        if (adapter.credentialRefs !== undefined) {
+          // Adapters that sign with their own credential pair (Volcengine
+          // AK/SK): the route's `apiKeyEnv` is the data-plane inference key and
+          // is never sent to the quota endpoint. Each slot accepts the first
+          // alias that resolves, and every slot must resolve.
+          const slots: string[] = []
+          for (const slot of adapter.credentialRefs) {
+            let hit: string | undefined
+            for (const ref of slot) {
+              hit = await this.resolveApiKey(ref)
+              if (hit !== undefined) break
+            }
+            if (hit === undefined) {
+              const hint = adapter.credentialRefs.map((candidates) => candidates[0]).join(' + ')
+              return failView(spec.id, spec.displayName, adapter.view, 'missing-credential', hint, active)
+            }
+            slots.push(hit)
+          }
+          credentials = slots
+          apiKey = slots[0]
+        } else if (spec.kind === 'openai-codex' && spec.apiKeyEnv === undefined) {
           // One resolution per attempt, shared by the quota call and the
           // adapter's post-401 retry: a second refresh built on the same
           // single-use refresh token is rejected upstream as
@@ -1080,7 +1113,7 @@ export class UsageService extends TypertRemoteService {
           }
           apiKey = resolved
         }
-        const payload = await adapter.fetch(spec.baseURL, apiKey, signal, refresh)
+        const payload = await adapter.fetch(spec.baseURL, apiKey, signal, refresh, credentials)
         return okView({ ...base, ...payload })
       } catch (error) {
         if (outerSignal?.aborted) throw error

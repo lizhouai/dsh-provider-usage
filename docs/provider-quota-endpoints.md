@@ -13,6 +13,7 @@
 | gemini | no (API key) | — | 无；仅私有 OAuth 接口 |
 | xai | yes | Management key (Bearer) | `GET https://management-api.x.ai/v1/billing/teams/{team_id}/prepaid/balance` |
 | mistral | no | — | 无，console only |
+| volcengine-ark (Agent Plan / Coding Plan) | yes | IAM **AK/SK**（V4 HMAC-SHA256 签名） | `POST https://open.volcengineapi.com/?Action=GetAFPUsage\|GetCodingPlanUsage&Version=2024-01-01` |
 
 ---
 
@@ -272,3 +273,70 @@ Authorization: Bearer <management key>
 3. **Gemini / Mistral** 返回 `{ supported: false, consoleUrl: ... }`，不要臆造端点。
 4. OpenAI `credit_grants` 仅 best-effort，失败静默降级。
 5. xAI 余额注意美分单位与负号语义。
+
+---
+
+## 7. volcengine-ark — yes（Agent Plan / Coding Plan，需 IAM AK/SK）
+
+火山方舟**订阅套餐**（Agent Plan / Coding Plan）的额度不在数据面 endpoint 上，而在火山 **OpenTOP 控制面**（`open.volcengineapi.com`，service `ark`，version `2024-01-01`）。两个产品各一个 action：
+
+| product | action | 返回 |
+|---|---|---|
+| Agent Plan | `GetAFPUsage` | `Result.AFP{FiveHour,Weekly,Monthly}`（绝对值 `Quota`/`Used`，`ResetTime` = epoch **毫秒**） |
+| Coding Plan | `GetCodingPlanUsage` | `Result.QuotaUsage[]`（`Level`/`Percent`，`ResetTimestamp` = epoch **秒**） |
+
+### 7.1 请求
+
+```
+POST https://open.volcengineapi.com/?Action=GetAFPUsage&Version=2024-01-01
+Content-Type: application/json
+X-Date: 20260617T000000Z
+X-Content-Sha256: <sha256(body)>
+Authorization: HMAC-SHA256 Credential=<AK>/20260617/cn-beijing/ark/request,
+               SignedHeaders=host;x-content-sha256;x-date, Signature=<hex>
+body: {}
+```
+
+签名即火山 V4（同 AWS SigV4）：canonical request = `METHOD\n/path\ncanonicalQuery\ncanonicalHeaders\n\nsignedHeaders\nbodyHash`；stringToSign = `HMAC-SHA256\n<x-date>\n<scope>\nsha256(canonicalRequest)`；签名密钥链 `HMAC(sk → yyyyMMdd → region → service → "request")`。`X-Date` 宽松，但过期会 `InvalidTimestamp`。
+
+### 7.2 返回示例
+
+```json
+// GetAFPUsage（Agent Plan "medium" 档）
+{ "Result": {
+    "PlanType": "medium",
+    "AFPFiveHour": { "Quota": 10000,  "Used": 0,     "ResetTime": -1 },
+    "AFPWeekly":   { "Quota": 35000,  "Used": 8750,  "ResetTime": 1785686400000 },
+    "AFPMonthly":  { "Quota": 100000, "Used": 25000, "ResetTime": 1787846399000 },
+    "AFPDaily":    { "Quota": 50000,  "Used": 0,     "ResetTime": 1785340800000 }
+} }
+
+// GetCodingPlanUsage（生效中）
+{ "Result": {
+    "Status": "Running",
+    "UpdateTimestamp": 1782226444,
+    "QuotaUsage": [
+      { "Level": "session", "Percent": 0.116,     "ResetTimestamp": 1782226478 },
+      { "Level": "weekly",  "Percent": 3.182143,  "ResetTimestamp": 1782662400 },
+      { "Level": "monthly", "Percent": 7.5730535, "ResetTimestamp": 1782403199 }
+    ]
+} }
+
+// GetCodingPlanUsage（套餐已回收/未订阅：只有 Status，没有 QuotaUsage）
+{ "Result": { "Status": "Reclaimed", "UpdateTimestamp": 1785322689 } }
+```
+
+### 7.3 注意事项
+
+- **推理 key 查不了额度**。数据面 `/api/plan/v3`、`/api/coding/v3` 的 `Authorization: Bearer <ARK_API_KEY>` 只能调模型；控制面额度接口要 IAM AK/SK 签名。实测（本机 `arkcli usage plan` + 网关直连）：
+  - `GetAFPUsage requires Volcengine Ark SSO STS`（仅 API Key 时 arkcli 的报错）；
+  - 数据面 `/api/plan/v3/usage`、`/api/coding/v3/usage` 等猜测路径全部 404。
+  唯一替代是 SSO 登录态（浏览器流程），不适合插件。
+- `-1` / `0` 是"本周期无需重置"的哨兵值，必须当作 **无重置时间**，不能当 epoch 0 渲染成 1970。
+- Agent Plan 的 `AFPDaily` 控制台与 arkcli 都不展示，适配器同样跳过。
+- `GetAgentPlanAFPUsage` 与 `GetAFPUsage` 在 2024-01-01 下都存在（网关探测 + 社区实现各用一个），返回结构相同；适配器以 `GetAFPUsage` 为主、`InvalidActionOrVersion` 时回退别名。
+- 团队版另走 `GetSeatAFPUsage` / `ListSeatAFPUsage` / `GetSeatInfoUsage`（需 SeatID），本插件未适配。
+- BytePlus 区域（`ark.ap-southeast.bytepluses.com`）是另一套 OpenAPI 域名，未适配。
+- 来源：官方 `@volcengine/openapi`（V4 签名实现）、`volcengine/ark-cli`（`skills/arkcli-usage`）、[CodexBar PR #2496](https://github.com/steipete/CodexBar/pull/2496)（Agent Plan AFP 读取）、[dsh-volcark-quota](https://github.com/ZnonEn/dsh-volcark-quota)（同类 DSH 插件）、网关实测。
+
+---

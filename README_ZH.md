@@ -32,7 +32,9 @@
   | `opencode` | `opencode`、`opencode-go` | `GET {baseURL}/usage` | Zen Go 滚动/周/月窗口 |
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | 团队 credit 余额 |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | 预付余额（USD） |
-- **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。对 OAuth 类 Provider（OpenAI Codex）则直接读取登录流程存入的授权记录，并在令牌临近过期时自动刷新。
+  | `volcengine-ark-agent` | `ark-agent-plan`、`ark-agent-plan-cn` | `POST open.volcengineapi.com GetAFPUsage` | 火山方舟 Agent Plan 5h/周/月窗口（**需 IAM AK/SK 签名**，非推理 key，见 [火山方舟 Agent Plan / Coding Plan](#火山方舟-agent-plan--coding-plan)） |
+  | `volcengine-ark-coding` | `ark-coding-plan`、`ark-coding-plan-cn` | `POST open.volcengineapi.com GetCodingPlanUsage` | 火山方舟 Coding Plan session/周/月窗口（同一对 AK/SK） |
+- **密钥安全** —— 通过 harness 凭据服务按次解析（环境变量 / `~/.dsh/.credentials.yaml`），不缓存、不落地。对 OAuth 类 Provider（OpenAI Codex）则直接读取登录流程存入的授权记录，并在令牌临近过期时自动刷新。火山方舟套餐路由是唯一「查询需要路由自身 key 之外凭证」的情形：套餐额度走**签名控制面**调用，因此这两类适配器改读一对 IAM AK/SK（见 [火山方舟 Agent Plan / Coding Plan](#火山方舟-agent-plan--coding-plan)）。
 - **悬浮球入口** —— 可任意拖动的悬浮球点击弹出用量面板，位置持久化；默认停靠在主对话区域左下角（左边距 = 底边距），面板头部的归位按钮一键回到默认位置；Provider 列表超过面板高度时自动滚动，面板**顶部边缘可拖拽**调整面板高度（变长/变短，localStorage 持久化）；球体光晕表达**当前正在使用**的 Provider——即**当前聚焦 session 自己的模型选择**（composer 模型座同源，客户端实时跟踪），因此切换 session 后无需重新选择模型，面板会立即把"使用中"标记切到该 session 的 Provider：绿色正常、黄色用量窗口剩余不足 30% 或余额低于黄阈值、红色查询失败/缺密钥/用量 ≥90% 或余额低于红阈值。闲置的 Provider 余量不足不再影响悬浮球颜色——切换到余量充足的另一个 Provider 后球体会恢复绿色；面板会标注"使用中"的 Provider，并照常列出所有 Provider 的用量明细。
 - **版本徽章** —— 面板标题旁显示当前运行的插件版本，一眼确认加载的是哪个发布版。
 - **中英双语** —— 面板内置中英文界面，默认跟随 harness 系统语言，标题栏按钮一键切换（localStorage 持久化）。
@@ -120,6 +122,50 @@ llm-pi-ai:
 ```
 
 注意区分另一类**必然失败**：部分模型对 ChatGPT 订阅账号不可用，后端直接返回 `400 The '<model>' model is not supported when using Codex with a ChatGPT account.`（实测如 `gpt-5.3-codex-spark`、`gpt-5-codex`）。这类是永久错误，重试无效——请换用账号支持的模型（如 `gpt-5.4` / `gpt-5.5` / `gpt-5.6` 系列）。
+
+## 火山方舟 Agent Plan / Coding Plan
+
+火山方舟的**订阅套餐**（Agent Plan / Coding Plan）额度不在推理端点上，而在火山**控制面**（OpenTOP OpenAPI），且必须用 **IAM AK/SK 做 V4 签名**。路由上那把套餐 key（`ARK_AGENT_PLAN_API_KEY` 等）是数据面 key，只能调模型：拿它查额度会被拒（实测 `GetAFPUsage requires Volcengine Ark SSO STS`），面板会一直查不到数。因此这两条路由除了推理 key，还要额外配一对 AK/SK。
+
+### 1. 路由
+
+`baseURL` 决定用哪个适配器：含 `/api/plan` → Agent Plan，含 `/api/coding` → Coding Plan。
+
+```yaml
+llm-pi-ai:
+  providers:
+    ark-agent-plan:
+      displayName: 火山方舟 - Agent Plan
+      apiKeyEnv: ARK_AGENT_PLAN_API_KEY
+      api: openai-responses
+      baseURL: https://ark.cn-beijing.volces.com/api/plan/v3
+    ark-coding-plan:
+      displayName: 火山方舟 - Coding Plan
+      apiKeyEnv: ARK_CODING_PLAN_API_KEY
+      baseURL: https://ark.cn-beijing.volces.com/api/coding   # Anthropic 协议；OpenAI 兼容端点用 /api/coding/v3
+```
+
+路由 id 任意；`ark-agent-plan` / `ark-coding-plan` / `ark-agent-plan-cn` / `ark-coding-plan-cn` 这些常见 id 即使省略 `baseURL` 也能被识别。
+
+### 2. 配置 AK/SK
+
+在火山引擎控制台 → 访问控制（IAM）→ 访问密钥，创建或查看 Access Key ID / Secret Access Key（查额度只需读权限），然后任选一种方式提供：
+
+```yaml
+# ~/.dsh/.credentials.yaml（也可用同名进程环境变量或项目 .env）
+refs:
+  VOLC_ARK_ACCESS_KEY_ID: AKLT...
+  VOLC_ARK_ACCESS_KEY_SECRET: ...
+```
+
+取值顺序：`VOLC_ARK_ACCESS_KEY_ID` → `VOLC_ACCESS_KEY_ID` → `VOLC_ACCESSKEY`（secret 同理，另有 `VOLC_ACCESS_KEY_SECRET` / `VOLC_SECRETKEY` / `VOLC_SECRET_KEY` 别名），第一个有值的生效。
+
+没配时面板显示「未配置密钥（VOLC_ARK_ACCESS_KEY_ID + VOLC_ARK_ACCESS_KEY_SECRET）」；配错时直接显示控制面错误（如 `HTTP 401: InvalidAccessKey: The security token[...] is invalid.`）。
+
+### 3. 展示内容
+
+- **Agent Plan** —— 5h / 每周 / 每月三个窗口，按 `Used`/`Quota` 绝对值算已用百分比 + 重置倒计时（`AFPDaily` 与控制台、`arkcli` 一致，不展示）。
+- **Coding Plan** —— session（5h）/ 每周 / 每月三个窗口，直接用后端的已用百分比。套餐未订阅或已回收时该路由没有数据行。
 
 ## 安装
 

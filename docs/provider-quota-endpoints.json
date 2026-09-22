@@ -179,6 +179,65 @@
         "https://github.com/hanmumuHL/check_balance",
         "https://theneuralbase.com/mistral-api/learn/advanced/la-plateforme-dashboard-overview/"
       ]
+    },
+    {
+      "id": "volcengine-ark-agent",
+      "support": "yes",
+      "credentialType": "iam_ak_sk",
+      "credentialHint": "火山引擎 IAM Access Key ID / Secret Access Key（控制台 → 访问控制 → 访问密钥，读权限即可）。套餐推理 key（ARK_AGENT_PLAN_API_KEY / ARK_API_KEY）是数据面 Bearer key，查额度会被拒：GetAFPUsage requires Volcengine Ark SSO STS",
+      "products": ["Agent Plan"],
+      "endpoints": [
+        {
+          "kind": "plan_quota",
+          "method": "POST",
+          "url": "https://open.volcengineapi.com/?Action=GetAFPUsage&Version=2024-01-01",
+          "headers": {
+            "X-Date": "yyyyMMdd'T'HHmmss'Z'",
+            "X-Content-Sha256": "sha256(body)",
+            "Authorization": "HMAC-SHA256 Credential={AK}/{yyyyMMdd}/cn-beijing/ark/request, SignedHeaders=host;x-content-sha256;x-date, Signature={hex}"
+          },
+          "body": "{}",
+          "signing": "火山 V4（同 AWS SigV4）：canonical= METHOD\\n/path\\ncanonicalQuery\\ncanonicalHeaders\\n\\nsignedHeaders\\nbodyHash；stringToSign=HMAC-SHA256\\n{x-date}\\n{scope}\\nsha256(canonical)",
+          "responseShape": "{ Result:{ PlanType, AFPFiveHour:{Quota,Used,ResetTime}, AFPWeekly:{...}, AFPMonthly:{...}, AFPDaily:{...} } }（ResetTime = epoch 毫秒；-1 = 本周期无需重置）",
+          "renders": "5h / weekly / monthly（AFPDaily 与控制台一致，不展示）",
+          "alias": "GetAgentPlanAFPUsage（同 version 下同样存在，返回结构相同；主 action 报 InvalidActionOrVersion 时回退）"
+        }
+      ],
+      "sources": [
+        "https://docs.volcengine.com/docs/82379/2479847",
+        "https://github.com/volcengine/ark-cli/blob/main/skills/arkcli-usage/references/arkcli-usage-plan.md",
+        "https://github.com/steipete/CodexBar/pull/2496",
+        "https://github.com/ZnonEn/dsh-volcark-quota"
+      ]
+    },
+    {
+      "id": "volcengine-ark-coding",
+      "support": "yes",
+      "credentialType": "iam_ak_sk",
+      "credentialHint": "同上（Agent Plan 与 Coding Plan 共用一对 AK/SK）",
+      "products": ["Coding Plan"],
+      "endpoints": [
+        {
+          "kind": "plan_quota",
+          "method": "POST",
+          "url": "https://open.volcengineapi.com/?Action=GetCodingPlanUsage&Version=2024-01-01",
+          "headers": {
+            "X-Date": "yyyyMMdd'T'HHmmss'Z'",
+            "X-Content-Sha256": "sha256(body)",
+            "Authorization": "HMAC-SHA256 Credential={AK}/{yyyyMMdd}/cn-beijing/ark/request, SignedHeaders=host;x-content-sha256;x-date, Signature={hex}"
+          },
+          "body": "{}",
+          "responseShape": "{ Result:{ Status, UpdateTimestamp, QuotaUsage:[{Level,Percent,ResetTimestamp}] } }（Percent = 已用百分比；ResetTimestamp = epoch 秒；-1/0 = 无重置；套餐未订阅/已回收时只有 Status，无 QuotaUsage）",
+          "renders": "session→5h limit / weekly / monthly",
+          "warnings": ["Level 命名可能为 session|5-hour|five_hour|5h、weekly|week、monthly|month"]
+        }
+      ],
+      "notCovered": ["团队版 GetSeatAFPUsage / ListSeatAFPUsage / GetSeatInfoUsage（需 SeatID）", "BytePlus 区域 ark.ap-southeast.bytepluses.com（另一套 OpenAPI 域名）"],
+      "sources": [
+        "https://docs.volcengine.com/docs/82379/2479850",
+        "https://github.com/volcengine/ark-cli/blob/main/skills/arkcli-usage/references/arkcli-usage-plan.md",
+        "https://github.com/steipete/CodexBar/pull/2496"
+      ]
     }
   ]
 }
