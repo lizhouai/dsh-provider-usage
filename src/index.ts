@@ -37,6 +37,7 @@ import z from '@deepseek-ai/schemastery'
 import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { readLiveSection, settingsNsForRoute } from './section.ts'
 import {
   OpenAiCodexReauthRequiredError,
   openAiCodexAccountId,
@@ -941,7 +942,7 @@ export class UsageService extends TypertRemoteService {
       const settings = this.ctx.get('settings')
       const routes: Array<{ id: string; name: string }> = llm?.listProviders?.() ?? []
       for (const route of routes) {
-        specs.push(await this.resolveRoute(route, settings))
+        specs.push(await this.resolveRoute(route, settings, llm))
       }
     }
     for (const extra of options.providers) {
@@ -960,16 +961,23 @@ export class UsageService extends TypertRemoteService {
     return specs
   }
 
+  /**
+   * Read one foreign plugin's live config section (see {@link readLiveSection}).
+   * `configEditor` is fetched lazily and defensively: it appeared in the same
+   * generation that removed the legacy `settings.get`, and an unavailable
+   * service must degrade to "no section", never break the query.
+   */
   private async readSection(settings: any, ns: string): Promise<any> {
-    if (!settings) return undefined
+    let configEditor: unknown
     try {
-      return await Promise.resolve(settings.get(ns))
+      configEditor = this.ctx.get('configEditor')
     } catch {
-      return undefined
+      configEditor = undefined
     }
+    return readLiveSection(settings, configEditor, ns)
   }
 
-  private async resolveRoute(route: { id: string; name: string }, settings: any): Promise<DetectedProvider> {
+  private async resolveRoute(route: { id: string; name: string }, settings: any, llm: any): Promise<DetectedProvider> {
     const known = KNOWN_ROUTES[route.id]
     let baseURL: string | undefined
     let apiKeyEnv: string | undefined
@@ -978,7 +986,7 @@ export class UsageService extends TypertRemoteService {
       baseURL = section?.baseURL ?? launchEnvironmentOf(this.ctx).get('DEEPSEEK_BASE_URL')?.value ?? known?.baseURL
       apiKeyEnv = section?.apiKeyEnv ?? known?.apiKeyEnv
     } else {
-      const section = await this.readSection(settings, 'llm-pi-ai')
+      const section = await this.readSection(settings, settingsNsForRoute(llm, route.id))
       const profile = section?.providers?.[route.id]
       baseURL = profile?.baseURL ?? known?.baseURL
       apiKeyEnv = profile?.apiKeyEnv ?? known?.apiKeyEnv
@@ -1165,11 +1173,13 @@ markRemoteMethod(UsageService.prototype, 'list', 'list')
 export function apply(ctx: Context, config: ProviderUsageConfig) {
   let current = () => config
   // Register the `provider-usage` settings namespace through the settings
-  // service (dsh ≥ 0.1.2: SettingsProvider.installSection replaces the old
-  // installSettingsSection helper). The source thunk feeds the live config
-  // below, so a `provider-usage:` section in settings.yaml hot-updates it.
+  // service (dsh ≤ 0.1.2: SettingsProvider.installSection replaces the old
+  // installSettingsSection helper). Newer dsh projects the entry's own Config
+  // as the settings page and no longer ships the method, so the call is
+  // guarded — the source thunk below still feeds the live config either way,
+  // and a `provider-usage:` profile section hot-updates it through re-mount.
   ctx.inject(['settings'], (settingsCtx: any) => {
-    settingsCtx.settings.installSection(ctx, NS, Config, config, {
+    settingsCtx.settings?.installSection?.(ctx, NS, Config, config, {
       setSource: (source: () => ProviderUsageConfig) => {
         current = source
       },
