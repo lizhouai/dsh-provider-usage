@@ -23,13 +23,14 @@
   | `deepseek-account` | `deepseek-account`（dsh ≥ 0.1.7） | `GET {platformOrigin}/api/v0/users/get_user_summary` | 账号钱包余额（充值 + 赠送合并展示，**读取 harness 内置 DeepSeek 账号登录**，无需配置）。该路由由 harness 无条件组合，因此**未登录时不显示该卡片**，登录后下一次轮询自动出现 |
   | `moonshot` | `moonshotai-cn`、`moonshotai` | `GET {baseURL}/users/me/balance` | 可用/代金券/现金余额 |
   | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | 每周用量及各限速窗口，含重置倒计时 |
+  | `commandcode` | `commandcode` | `GET {origin}/alpha/billing/credits` | 5h/周窗口 + 月度积分（用量摘要尽力而为） |
   | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credit 已用/总额 |
   | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | 付费档用量快照 / 免费档月度用量 |
   | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT 订阅 5h/周窗口 + credits + spend control（**OAuth 登录**，非 API key，见 [通过 OAuth 添加 OpenAI Codex](#通过-oauth-添加-openai-codex)） |
   | `openai` | `openai` | `GET {origin}/v1/organization/costs` | 当月花费（**需 Admin key**，普通 key 会 403） |
   | `anthropic` | `anthropic` | `GET {baseURL}/v1/organizations/cost_report` | 当月花费（**需 Admin key**，`x-api-key` 头） |
   | `minimax` | `minimax`、`minimax-cn` | `GET {origin}/v1/api/openplatform/coding_plan/remains` | Coding Plan 5h/周剩余百分比 |
-  | `zai` | `zai`、`zai-coding-cn` | `GET {origin}/api/monitor/usage/quota/limit` | GLM Coding Plan 窗口（`Authorization` 直接放 key，无 Bearer） |
+  | `zai` | `zai`、`zai-coding-cn` | `GET {origin}/api/monitor/usage/quota/limit` | GLM Coding Plan 窗口，`TOKENS_LIMIT` 或 `CREDIT_LIMIT` 条目（`Authorization` 直接放 key，无 Bearer） |
   | `opencode` | `opencode`、`opencode-go` | `GET {baseURL}/usage` | Zen Go 滚动/周/月窗口 |
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | 团队 credit 余额 |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | 预付余额（USD） |
