@@ -23,13 +23,14 @@
   | `deepseek-account` | `deepseek-account` (dsh ≥ 0.1.7) | `GET {platformOrigin}/api/v0/users/get_user_summary` | account wallet balance (recharge + bonus merged; **reads the harness's built-in DeepSeek Account sign-in**, zero config). The harness composes this route unconditionally, so the card is **omitted while no sign-in is stored** — it appears on the next poll after you sign in |
   | `moonshot` | `moonshotai-cn`, `moonshotai` | `GET {baseURL}/users/me/balance` | available / voucher / cash balance |
   | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | 5h / weekly / monthly usage windows + reset countdown. A lapsed membership is reported as **“no active plan”** instead of a blank card — the endpoint answers `{}` (HTTP 200) once the plan ends |
+  | `commandcode` | `commandcode` | `GET {origin}/alpha/billing/credits` | 5h / weekly windows + monthly credits (usage summary is best-effort) |
   | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credits used / total |
   | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | plan usage snapshots (paid) or monthly usage (free) |
   | `openai-codex` | `openai-codex` | `GET {baseURL}/wham/usage` | ChatGPT subscription 5h / weekly windows + credits + spend control (**OAuth login**, not an API key — see the [setup guide](docs/provider-codex.md)) |
   | `openai` | `openai` | `GET {origin}/v1/organization/costs` | current-month spend (**admin key required**; a regular key fails with 403) |
   | `anthropic` | `anthropic` | `GET {baseURL}/v1/organizations/cost_report` | current-month spend (**admin key required**, `x-api-key` auth) |
   | `minimax` | `minimax`, `minimax-cn` | `GET {origin}/v1/api/openplatform/coding_plan/remains` | Coding Plan 5h / weekly remaining % |
-  | `zai` | `zai`, `zai-coding-cn` | `GET {origin}/api/monitor/usage/quota/limit` | GLM Coding Plan windows (raw key in `Authorization`, no Bearer) |
+  | `zai` | `zai`, `zai-coding-cn` | `GET {origin}/api/monitor/usage/quota/limit` | GLM Coding Plan windows, `TOKENS_LIMIT` or `CREDIT_LIMIT` entries (raw key in `Authorization`, no Bearer) |
   | `opencode` | `opencode`, `opencode-go` | `GET {baseURL}/usage` | Zen Go rolling / weekly / monthly windows |
   | `vercel-ai-gateway` | `vercel-ai-gateway` | `GET {baseURL}/v1/credits` | team credit balance |
   | `xai` | `xai` | `GET {baseURL}/billing/credits` | prepaid balance (USD) |

@@ -23,7 +23,7 @@
  * - `openai`         → GET {origin}/v1/organization/costs      (Admin key, 当月花费)
  * - `anthropic`      → GET {baseURL}/v1/organizations/cost_report (Admin key, 当月花费)
  * - `minimax`        → GET {origin}/v1/api/openplatform/coding_plan/remains (Coding Plan 5h/weekly)
- * - `zai`            → GET {origin}/api/monitor/usage/quota/limit (GLM Coding Plan 配额)
+ * - `zai`            → GET {origin}/api/monitor/usage/quota/limit (GLM Coding Plan 配额, TOKENS/CREDIT 窗口)
  * - `opencode`       → GET {baseURL}/usage                     (Zen Go 订阅 5h/weekly/monthly)
  * - `vercel-ai-gateway` → GET {baseURL}/v1/credits             (团队 credit 余额)
  * - `xai`            → GET {baseURL}/billing/credits           (预付余额; Management API 见注释)
@@ -31,6 +31,7 @@
  *                     (火山方舟 Agent Plan 5h/weekly/monthly; IAM AK/SK V4 签名, 见 volcengine-ark.ts)
  * - `volcengine-ark-coding` → POST open.volcengineapi.com GetCodingPlanUsage
  *                     (火山方舟 Coding Plan session/weekly/monthly; 同一对 AK/SK)
+ * - `commandcode`    → GET {origin}/alpha/billing/credits         (Command Code 订阅 5h/weekly 窗口 + 月度积分)
  *
  * The browser widget polls `usage/list` on its own configurable interval, so
  * this service stays stateless: every call fetches live values.
@@ -62,6 +63,8 @@ import {
 } from './openai-codex.ts'
 import { orderUsageRows, toNumber, toResetAt, NoActiveSubscriptionError, type BalanceRow, type ProviderUsageView, type UsageListResult, type UsageRow } from './wire.ts'
 import { parseKimiUsages } from './kimi.ts'
+import { parseCommandCodeUsage } from './commandcode.ts'
+import { parseZaiUsage } from './zai.ts'
 import {
   ACCESS_KEY_REFS,
   AGENT_PLAN_ACTIONS,
@@ -104,6 +107,7 @@ const PROVIDER_KINDS = [
   'xai',
   'volcengine-ark-agent',
   'volcengine-ark-coding',
+  'commandcode',
 ] as const
 
 type ProviderKind = (typeof PROVIDER_KINDS)[number]
@@ -259,6 +263,7 @@ const KNOWN_ROUTES: Record<string, { baseURL?: string; apiKeyEnv?: string; displ
   'minimax-cn': { baseURL: 'https://api.minimaxi.com/anthropic', apiKeyEnv: 'MINIMAX_CN_API_KEY', displayName: 'MiniMax CN' },
   zai: { baseURL: 'https://api.z.ai/api/coding/paas/v4', apiKeyEnv: 'ZAI_API_KEY', displayName: 'Z.AI' },
   'zai-coding-cn': { baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4', apiKeyEnv: 'ZAI_CODING_CN_API_KEY', displayName: 'Z.AI Coding CN' },
+  commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1', apiKeyEnv: 'COMMANDCODE_API_KEY', displayName: 'Command Code' },
   'qwen-token-plan': { baseURL: 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1', apiKeyEnv: 'QWEN_TOKEN_PLAN_API_KEY', displayName: 'Qwen Token Plan' },
   'qwen-token-plan-cn': { baseURL: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', apiKeyEnv: 'QWEN_TOKEN_PLAN_CN_API_KEY', displayName: 'Qwen Token Plan CN' },
   xiaomi: { baseURL: 'https://api.xiaomimimo.com/v1', apiKeyEnv: 'XIAOMI_API_KEY', displayName: 'Xiaomi MiMo' },
@@ -493,6 +498,26 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
       // nothing is a genuine parse failure and must stay visible as one.
       if (!hasPlanData) throw new NoActiveSubscriptionError()
       throw new Error('no usage windows in the usage response')
+    },
+  },
+
+  commandcode: {
+    view: 'usage',
+    match: /commandcode\.ai/i,
+    async fetch(baseURL, apiKey, signal) {
+      // Command Code (api.commandcode.ai) subscription quota. The route baseURL
+      // is the inference endpoint (/provider/v1); the billing endpoints hang
+      // off the host root under /alpha. The usage summary is best-effort —
+      // its failure must not fail the whole probe, only the credits row.
+      const origin = new URL(baseURL).origin
+      const body = await fetchJson(`${origin}/alpha/billing/credits`, apiKey, signal)
+      let summary: any
+      try {
+        summary = await fetchJson(`${origin}/alpha/usage/summary`, apiKey, signal)
+      } catch {
+        summary = null
+      }
+      return { balances: null, usages: parseCommandCodeUsage(body, summary) }
     },
   },
 
@@ -780,30 +805,7 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
         'content-type': 'application/json',
         'accept-language': 'en-US,en',
       })
-      if (body?.success === false) {
-        throw new Error(String(body?.msg ?? body?.message ?? 'z.ai quota query failed'))
-      }
-      const limits: any[] = Array.isArray(body?.data?.limits) ? body.data.limits : []
-      // TOKENS_LIMIT entries are the coding-plan windows (percentage = used);
-      // TIME_LIMIT is the MCP lane and carries no token quota. The nearer
-      // reset is the 5h window, the further one the weekly window.
-      const tokenLimits = limits
-        .filter((item) => item?.type === 'TOKENS_LIMIT')
-        .sort((a, b) => (toNumber(a?.nextResetTime) ?? Infinity) - (toNumber(b?.nextResetTime) ?? Infinity))
-      const rows: UsageRow[] = []
-      tokenLimits.forEach((item, index) => {
-        const percent = toNumber(item?.percentage)
-        if (percent === null) return
-        rows.push({
-          label: index === 0 ? '5h limit' : index === 1 ? 'weekly' : `limit ${index + 1}`,
-          used: percent,
-          limit: 100,
-          remaining: 100 - percent,
-          percent,
-          resetAt: toResetAt(item?.nextResetTime),
-        })
-      })
-      return { balances: null, usages: orderUsageRows(rows) }
+      return { balances: null, usages: parseZaiUsage(body) }
     },
   },
 
