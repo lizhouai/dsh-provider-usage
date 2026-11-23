@@ -12,7 +12,7 @@
 | anthropic | partial | Admin key (`x-api-key` 头) | `GET /v1/organizations/usage_report/messages`, `GET /v1/organizations/cost_report` |
 | gemini | no (API key) | — | 无；仅私有 OAuth 接口 |
 | xai | yes | Management key (Bearer) | `GET https://management-api.x.ai/v1/billing/teams/{team_id}/prepaid/balance` |
-| mistral | no | — | 无，console only |
+| mistral | yes | 推理 key (Bearer) | `GET /v1/billing/budget`, `GET /v1/billing/subscription` |
 | volcengine-ark (Agent Plan / Coding Plan) | yes | IAM **AK/SK**（V4 HMAC-SHA256 签名） | `POST https://open.volcengineapi.com/?Action=GetAFPUsage\|GetCodingPlanUsage&Version=2024-01-01` |
 
 ---
@@ -256,13 +256,72 @@ Authorization: Bearer <management key>
 
 ---
 
-## 6. mistral — no
+## 6. mistral — yes（推理 key 即可，无需后台 cookie）
 
-无任何公开余额/用量查询接口。官方文档无 billing API；开源工具 check_balance 明确标注 "⚠️ Console only / 未开放余额查询 API"，控制台 https://console.mistral.ai/usage 。429 是唯一程序化信号。
+**更正**：早期结论写的是 "no / console only"，但有两个已上线实现证明可以用普通推理 key（`MISTRAL_API_KEY`）读官方计费接口：
 
-**适配器结论：标记 no，UI 给 console 链接。**
+- Mistral 自己的 Vibe CLI：`mistralai/mistral-vibe`（`vibe/app_server/_billing.py`、`_account.py`）；
+- [yetone/magpie](https://github.com/yetone/magpie/blob/main/internal/provider/mistral_plan.go) 的 `internal/provider/mistral_plan.go`（含数据来源与评论区实测记录）。
 
-来源：https://github.com/hanmumuHL/check_balance ；https://theneuralbase.com/mistral-api/learn/advanced/la-plateforme-dashboard-overview/
+### 6.1 Budget（月度额度，权威口径）
+
+```
+GET https://api.mistral.ai/v1/billing/budget
+Authorization: Bearer <MISTRAL_API_KEY>
+```
+
+```json
+{
+  "vibe_budget": {"usage_percentage": 6.02, "initial_budget": 150.0,
+                  "currency": "USD", "reset_at": "2026-12-01T00:00:00Z", "payg_enabled": false},
+  "api_budget":  {"usage_percentage": 0.0,  "initial_budget": 15.0,
+                  "currency": "USD", "reset_at": "2026-12-01T00:00:00Z", "payg_enabled": false},
+  "usage_percentage": 0.0, "initial_budget": 15.0, "currency": "USD", "reset_at": "2026-12-01T00:00:00Z"
+}
+```
+
+要点：
+
+- `usage_percentage` 是**百分比**，已用金额 = `initial_budget × usage_percentage / 100`（不能当金额读）。
+- 两个 budget 都是**组织级**的：同一组织的任何 key 读到同一对数值。区别在于 key 花哪个：console 建的 API key（`plan_type: "api"`）花 `api_budget`，Vibe key（`"chat"`）花 `vibe_budget`。
+- 套餐没有的额度，该块**缺失**或 `initial_budget: 0`——是「不在该套餐」，不是「0/0 已用尽」。
+- 顶层那组扁平字段是 `api_budget` 的副本，不是独立的第三个 budget。
+- `reset_at` 为每月 1 日 00:00 UTC，与订阅续费日无关。
+
+### 6.2 Subscription（套餐名）
+
+```
+GET https://api.mistral.ai/v1/billing/subscription
+→ {"plan_name": "EDU", "payg_enabled": false, "vibe_payg_enabled": false, "enterprise": false}
+```
+
+`plan_name` 常见值：`FREE` / `INDIVIDUAL`(Pro) / `EDU`(Student) / `TEAM` / `ENTERPRISE`。
+
+### 6.3 key 类型（可选，需 console 域）
+
+```
+GET https://console.mistral.ai/api/vibe/whoami
+→ {"plan_type": "CHAT", "plan_name": "EDU", ...}
+```
+
+同一个 key 在 `api.mistral.ai` 上取不到 whoami（404），所以想「按 key 类型只显示对应那一个额度」才需要这一步；本插件的适配器选择**同时展示两个额度**，因此只用 6.1 + 6.2，不依赖 console 域。
+
+### 6.4 实测
+
+用 EDU（Student）套餐的推理 key 验证：
+
+```
+GET /v1/billing/budget       → 200，vibe_budget 与 api_budget 均有 usage_percentage / initial_budget /
+                                currency / reset_at；reset_at 为下月 1 日 00:00 UTC
+GET /v1/billing/subscription → 200，plan_name "EDU"，payg_enabled false
+GET /v1/billing/budget       带错误 key → 401 {"detail":"Invalid API Key"}
+```
+
+未在 IDE/推理以外的套餐上验证；`FREE` 等无额度的账号预期返回空或缺失的 budget 块，适配器把这种情况报为「无生效中的套餐」。
+
+**适配器结论：标记 yes，`kind: mistral`，`view: 'usage'`，两个本月窗口 + 套餐名。**
+
+来源：https://github.com/yetone/magpie/blob/main/internal/provider/mistral_plan.go ；https://github.com/mistralai/mistral-vibe
 
 ---
 
@@ -270,7 +329,7 @@ Authorization: Bearer <management key>
 
 1. **三类管理凭证分开存**：OpenAI Admin key / Anthropic Admin key（走 `x-api-key` 头）/ xAI Management key（不同 baseURL），均与推理 key 不同，配置 UI 需单独字段+引导文案。
 2. **Codex** 只读 `~/.codex/auth.json`，token stale 时不要自行回写，引导用户跑 codex CLI。
-3. **Gemini / Mistral** 返回 `{ supported: false, consoleUrl: ... }`，不要臆造端点。
+3. **Gemini** 返回 `{ supported: false, consoleUrl: ... }`，不要臆造端点（Mistral 已更正为 yes，见第 6 节）。
 4. OpenAI `credit_grants` 仅 best-effort，失败静默降级。
 5. xAI 余额注意美分单位与负号语义。
 

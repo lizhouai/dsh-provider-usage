@@ -15,13 +15,14 @@
 ## Features
 
 - **Auto-detection** — enumerates the provider routes registered in the current profile (`ctx.llm`); zero configuration for well-known routes.
-- **Per-kind wire adapters** — routes with no public balance/usage API (Google, Mistral, Groq, Bedrock, Azure, Qwen Token Plan, …) are listed as `unsupported` instead of being silently dropped:
+- **Per-kind wire adapters** — routes with no public balance/usage API (Google, Groq, Bedrock, Azure, Qwen Token Plan, …) are listed as `unsupported` instead of being silently dropped:
 
   | kind | routes | query | shows |
   |---|---|---|---|
   | `deepseek` | `deepseek-official`, `deepseek` | `GET {baseURL}/user/balance` | total / granted / topped-up balance |
   | `deepseek-account` | `deepseek-account` (dsh ≥ 0.1.7) | `GET {platformOrigin}/api/v0/users/get_user_summary` | account wallet balance (recharge + bonus merged; **reads the harness's built-in DeepSeek Account sign-in**, zero config). The harness composes this route unconditionally, so the card is **omitted while no sign-in is stored** — it appears on the next poll after you sign in |
   | `moonshot` | `moonshotai-cn`, `moonshotai` | `GET {baseURL}/users/me/balance` | available / voucher / cash balance |
+  | `mistral` | `mistral` | `GET {baseURL}/v1/billing/budget` + `/v1/billing/subscription` | both this month's API and Vibe allowances (used / limit / remaining / reset) plus the plan name. **An ordinary inference key is enough — no console cookie**; both allowances are the organization's, so both rows are shown rather than picking one by key kind |
   | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | 5h / weekly / monthly usage windows + reset countdown. A lapsed membership is reported as **“no active plan”** instead of a blank card — the endpoint answers `{}` (HTTP 200) once the plan ends |
   | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credits used / total |
   | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | plan usage snapshots (paid) or monthly usage (free) |

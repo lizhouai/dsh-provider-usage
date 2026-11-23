@@ -15,13 +15,14 @@
 ## 功能
 
 - **自动探测** —— 自动枚举当前 profile 中已注册的 provider 路由（`ctx.llm`），常见路由零配置。
-- **按 provider 类型查询额度** —— 没有公开余额/用量接口的路由（Google、Mistral、Groq、Bedrock、Azure、Qwen Token Plan 等）会在面板中标注为「不支持」，而不是被静默忽略：
+- **按 provider 类型查询额度** —— 没有公开余额/用量接口的路由（Google、Groq、Bedrock、Azure、Qwen Token Plan 等）会在面板中标注为「不支持」，而不是被静默忽略：
 
   | kind | 路由 | 查询接口 | 展示内容 |
   |---|---|---|---|
   | `deepseek` | `deepseek-official`、`deepseek` | `GET {baseURL}/user/balance` | 余额（含赠送/充值明细） |
   | `deepseek-account` | `deepseek-account`（dsh ≥ 0.1.7） | `GET {platformOrigin}/api/v0/users/get_user_summary` | 账号钱包余额（充值 + 赠送合并展示，**读取 harness 内置 DeepSeek 账号登录**，无需配置）。该路由由 harness 无条件组合，因此**未登录时不显示该卡片**，登录后下一次轮询自动出现 |
   | `moonshot` | `moonshotai-cn`、`moonshotai` | `GET {baseURL}/users/me/balance` | 可用/代金券/现金余额 |
+  | `mistral` | `mistral` | `GET {baseURL}/v1/billing/budget` + `/v1/billing/subscription` | API 与 Vibe 两个本月额度（已用/总量/剩余/重置日）+ 套餐名。**用普通推理 key 即可，无需后台 cookie**；两个额度都是组织级的，故一并展示，不按 key 类型择一 |
   | `kimi-coding` | `kimi-coding` | `GET {baseURL}/v1/usages` | 5h / 每周 / 每月用量窗口，含重置倒计时。会员到期后接口返回 `{}`（HTTP 200），卡片会明确显示**「无生效中的套餐」**，而不是留一张空白卡片 |
   | `openrouter` | `openrouter` | `GET {origin}/api/v1/credits` | credit 已用/总额 |
   | `github-copilot` | `github-copilot` | `GET api.github.com/copilot_internal/user` | 付费档用量快照 / 免费档月度用量 |
