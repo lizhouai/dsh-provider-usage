@@ -13,6 +13,8 @@
  *                     dsh ≥ 0.1.7 的 `deepseek-account` 路由)
  * - `kimi-coding`    → GET {baseURL}/v1/usages                 (订阅配额: 5h/weekly/monthly 窗口;
  *                     会员到期后接口回 `{}`，卡片如实报告“无生效套餐”而不是留空)
+ * - `mistral`        → GET {baseURL}/v1/billing/budget + /v1/billing/subscription
+ *                     (API 与 Vibe 两个月度额度; 推理 key 即可读, 无需后台 cookie)
  * - `moonshot`       → GET {baseURL}/users/me/balance          (开放平台余额)
  * - `openrouter`     → GET {origin}/api/v1/credits             (credit 总额与已用量)
  * - `github-copilot` → GET api.github.com/copilot_internal/user (订阅配额快照, OAuth token)
@@ -62,6 +64,7 @@ import {
 } from './openai-codex.ts'
 import { orderUsageRows, toNumber, toResetAt, NoActiveSubscriptionError, type BalanceRow, type ProviderUsageView, type UsageListResult, type UsageRow } from './wire.ts'
 import { parseKimiUsages } from './kimi.ts'
+import { parseMistralUsage } from './mistral.ts'
 import {
   ACCESS_KEY_REFS,
   AGENT_PLAN_ACTIONS,
@@ -91,6 +94,7 @@ const PROVIDER_KINDS = [
   'deepseek',
   'deepseek-account',
   'kimi-coding',
+  'mistral',
   'moonshot',
   'openrouter',
   'github-copilot',
@@ -493,6 +497,35 @@ const ADAPTERS: Record<ProviderKind, QuotaAdapter> = {
       // nothing is a genuine parse failure and must stay visible as one.
       if (!hasPlanData) throw new NoActiveSubscriptionError()
       throw new Error('no usage windows in the usage response')
+    },
+  },
+
+  mistral: {
+    view: 'usage',
+    match: /api\.mistral\.ai/i,
+    async fetch(baseURL, apiKey, signal) {
+      // Mistral's own Vibe CLI reads these two billing endpoints with the
+      // ordinary inference key, so no console cookie is involved. The budgets
+      // are the organization's (every key reads the same pair); this card shows
+      // both months rather than picking by key kind, which needs another
+      // console-origin request (`console.mistral.ai/api/vibe/whoami`) that a
+      // key alone cannot always reach.
+      const base = root(baseURL)
+      const billing = base.endsWith('/v1') ? `${base}/billing` : `${base}/v1/billing`
+      const budgetBody = await fetchJson(`${billing}/budget`, apiKey, signal)
+      // The card is useful without the plan name, so a subscription failure
+      // must not sink the budgets; budgets alone still render.
+      let subscriptionBody: unknown
+      try {
+        subscriptionBody = await fetchJson(`${billing}/subscription`, apiKey, signal)
+      } catch {
+        subscriptionBody = undefined
+      }
+      const { usages } = parseMistralUsage(budgetBody, subscriptionBody)
+      if (usages.length > 0) return { balances: null, usages }
+      // Both blocks absent (or with no allowance) means this organization has
+      // no monthly budget at all — an account state, not a parse failure.
+      throw new NoActiveSubscriptionError()
     },
   },
 
